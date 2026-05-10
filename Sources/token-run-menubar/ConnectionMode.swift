@@ -1,0 +1,34 @@
+import Foundation
+
+/// User-selectable connection mode for the menu-bar consumer.
+///
+/// `auto` walks loopback → remote (no automatic local-direct fallback —
+/// users opt into that mode explicitly because it bypasses the server.
+/// `remote` skips the loopback probe (useful when the menu bar app runs on a different machine).
+/// `loopback` pins to the local server (`127.0.0.1:18910`) and never uses a remote URL.
+/// `localDirect` reads OAuth credentials and JSONL out of `~/.claude` /
+/// `~/.codex` directly — same stack as the daemon, just running in-process.
+public enum ConnectionMode: String, CaseIterable, Codable, Sendable {
+    case auto
+    case remote
+    case loopback
+    case localDirect
+
+    public var label: String {
+        switch self {
+        case .auto: return "자동 (Loopback → 원격)"
+        case .remote: return "원격 서버"
+        case .loopback: return "로컬 서버 (127.0.0.1)"
+        case .localDirect: return "로컬 직접 read (서버 없이)"
+        }
+    }
+
+    public var shortLabel: String {
+        switch self {
+        case .auto: return "자동"
+        case .remote: return "원격"
+        case .loopback: return "로컬"
+        case .localDirect: return "직접"
+        }
+    }
+}

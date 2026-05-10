@@ -1,0 +1,22 @@
+{
+  "five_hour": {
+    "utilization": 21.0,
+    "resets_at": "2026-04-27T07:09:59.785966+00:00"
+  },
+  "seven_day": {
+    "utilization": 25.0,
+    "resets_at": "2026-05-02T18:00:00Z"
+  },
+  "seven_day_sonnet": {
+    "utilization": 1.0,
+    "resets_at": "2026-05-02T18:00:00Z"
+  },
+  "seven_day_opus": null,
+  "extra_usage": {
+    "is_enabled": false,
+    "monthly_limit": null,
+    "used_credits": null,
+    "utilization": null,
+    "currency": null
+  }
+}
