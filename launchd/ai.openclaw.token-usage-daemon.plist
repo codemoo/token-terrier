@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.openclaw.token-usage-daemon</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/token-usage-daemon</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>20</integer>
+  <key>StandardOutPath</key>
+  <string>/tmp/token-usage-daemon.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/token-usage-daemon.err.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>TOKEN_USAGE_BIND</key>
+    <string>127.0.0.1</string>
+    <key>TOKEN_USAGE_PORT</key>
+    <string>18910</string>
+  </dict>
+</dict>
+</plist>

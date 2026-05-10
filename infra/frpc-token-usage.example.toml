@@ -1,0 +1,8 @@
+# Example frp client snippet. Replace the domain with your own HTTPS endpoint.
+
+[[proxies]]
+name = "token-usage"
+type = "http"
+localIP = "127.0.0.1"
+localPort = 18910
+customDomains = ["your-token-server.example.com"]

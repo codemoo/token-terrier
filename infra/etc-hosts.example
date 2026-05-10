@@ -1,0 +1,5 @@
+# Optional /etc/hosts example for LAN deployments where public DNS hairpinning
+# does not work. Replace both values with your internal reverse-proxy address
+# and public hostname.
+
+192.0.2.10 your-token-server.example.com

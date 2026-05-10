@@ -1,0 +1,19 @@
+{
+  "primary": {
+    "usedPercent": 0,
+    "windowMinutes": 300,
+    "resetsAt": "2026-04-27T10:01:35Z"
+  },
+  "secondary": {
+    "usedPercent": 9,
+    "windowMinutes": 10080,
+    "resetsAt": "2026-04-28T18:18:24Z"
+  },
+  "tertiary": null,
+  "credits": {
+    "remaining": 863.9,
+    "updatedAt": "2026-04-27T05:02:00Z"
+  },
+  "loginMethod": "pro",
+  "accountEmail": "person@example.com"
+}

@@ -1,0 +1,32 @@
+.build/
+.swiftpm/
+.DS_Store
+*.xcodeproj
+*.xcworkspace
+.tmp-home/
+.home/
+.claude/
+.config/
+.codex/
+.remember/
+build/
+releases/
+dist/
+server-go/
+
+# Sparkle signing key — must never leave this machine
+infra/sparkle-private-key*
+infra/*.local
+infra/*private*
+infra/*tunnel*
+infra/local-nginx-token-run.conf
+infra/frpc-token-run.toml.snippet
+
+# Local design/research scratch can contain machine-specific hostnames.
+RESEARCH.md
+
+# Bearer tokens copied into dist/ for synced Macs — keep out of git.
+dist/tokens.json
+
+# pprof heap snapshots from token-usage-daemon — local diff scratch only
+server-go/heap-snapshots/
