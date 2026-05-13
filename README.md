@@ -5,8 +5,14 @@
 <h1 align="center">Token Terrier</h1>
 
 <p align="center">
-  A macOS menu bar token monitor for Claude Code and ChatGPT Codex, powered by
-  Bapful the Bedlington Terrier.
+  Monitor local and remote Claude Code / Codex token usage from your macOS menu
+  bar, powered by Bapful the Bedlington Terrier.
+</p>
+
+<p align="center">
+  <a href="https://github.com/codemoo/token-terrier/actions/workflows/ci.yml">
+    <img src="https://github.com/codemoo/token-terrier/actions/workflows/ci.yml/badge.svg" alt="CI">
+  </a>
 </p>
 
 Token Terrier is built around one idea: the token meter does not have to run on
@@ -29,6 +35,20 @@ Claude/Codex credentials + logs
 server-go HTTP/SSE server  --->  Token Terrier menu bar app
    local or remote host              macOS viewer
 ```
+
+## Why Token Terrier?
+
+Most token monitors assume the viewer and the work are on the same machine.
+Token Terrier separates collection from viewing: run `server-go` where Claude
+Code or Codex is actually doing work, then watch live usage from your Mac menu
+bar.
+
+- Remote-first monitoring for agents running on another Mac, workstation, or
+  server.
+- One compact menu bar view for Claude Code and ChatGPT Codex.
+- Live HTTP/SSE updates with local direct-read fallback for single-Mac setups.
+- Small public surface: a SwiftUI menu bar app and a standalone Go server.
+- A running Bedlington Terrier whose pace follows token burn.
 
 ## What It Does
 
@@ -53,6 +73,18 @@ infra/sparkle-public-key.txt Sparkle public update key
 
 Machine-specific deployment files, private hostnames, private keys, and local
 tokens are intentionally not part of this repository.
+
+## Install
+
+Download the latest macOS app from
+[GitHub Releases](https://github.com/codemoo/token-terrier/releases/latest).
+
+For remote monitoring, build and run `server-go` on the machine that owns the
+Claude/Codex credentials and logs, then point the app at that server's base URL.
+
+Current releases are ad-hoc signed for personal/internal use, so macOS may ask
+you to approve the first launch. Developer ID signing, notarization, and a
+Homebrew cask are still future distribution work.
 
 ## Quick Start
 
