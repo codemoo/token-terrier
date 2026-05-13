@@ -18,6 +18,10 @@ another workstation, a remote Mac, or any machine that owns the credentials and
 session logs. The app can also fall back to direct local reads when everything is
 on one Mac.
 
+<p align="center">
+  <img src="docs/assets/token-terrier-menubar-demo.gif" alt="Token Terrier menu bar demo showing Bapful running next to remote Claude and Codex usage" width="520">
+</p>
+
 ```text
 Claude/Codex credentials + logs
           |

@@ -28,12 +28,12 @@ final class BedlFrames {
     func image(at idx: Int) -> Image {
         guard !images.isEmpty else { return Image(systemName: "pawprint.fill") }
         let clamped = idx % images.count
-        return Image(nsImage: images[clamped])
+        return Image(nsImage: images[clamped]).renderingMode(.original)
     }
 
     func standingImage() -> Image {
         if let idleImage {
-            return Image(nsImage: idleImage)
+            return Image(nsImage: idleImage).renderingMode(.original)
         }
         return image(at: 0)
     }
@@ -117,7 +117,7 @@ final class BedlFrames {
     private static func loadTemplateFrame(from url: URL) -> NSImage? {
         guard let img = NSImage(contentsOf: url) else { return nil }
         let mask = img.bedlSilhouetteTemplateMask()
-        mask.isTemplate = true
+        mask.isTemplate = false
         return mask
     }
 }
@@ -170,9 +170,9 @@ private extension NSImage {
             }
             let alpha = UInt8((silhouetteAlpha * sourceAlpha) / 255)
 
-            pixels[offset] = 0
-            pixels[offset + 1] = 0
-            pixels[offset + 2] = 0
+            pixels[offset] = 255
+            pixels[offset + 1] = 255
+            pixels[offset + 2] = 255
             pixels[offset + 3] = alpha
         }
 
@@ -272,6 +272,7 @@ struct RunningBedl: View {
         }
         .onAppear { BedlFrames.shared.setHeight(height) }
         .onChange(of: height) { _, newValue in BedlFrames.shared.setHeight(newValue) }
+        .foregroundStyle(.primary)
     }
 }
 
