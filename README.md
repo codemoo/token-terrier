@@ -56,8 +56,8 @@ bar.
 - Separates collection from viewing, so remote token activity can be monitored
   from another Mac.
 - Streams updates over provider-scoped SSE endpoints.
-- Reads Claude/Codex OAuth credentials, JSONL session logs, and optional Hermes
-  SQLite usage data.
+- Reads Claude/Codex OAuth credentials, JSONL session logs, optional Hermes
+  SQLite data, and optional codex-lb API aggregate usage.
 - Uses bundled Bedlington Terrier assets for the app icon and menu bar animation.
 - Supports Sparkle app updates through GitHub Releases.
 
@@ -132,6 +132,7 @@ Codex credentials:  ~/.codex/auth.json
 Claude JSONL:       ~/.claude/projects/**/*.jsonl
 Codex JSONL:        ~/.codex/sessions/**/*.jsonl
 Hermes SQLite:      ~/.hermes/state.db
+codex-lb API:       http://127.0.0.1:2455/v1/usage
 ```
 
 Useful environment variables:
@@ -144,8 +145,12 @@ TOKEN_USAGE_CODEX_CRED=/path/to/.codex/auth.json
 TOKEN_USAGE_CLAUDE_PROJECTS=/path/to/.claude/projects
 TOKEN_USAGE_CODEX_SESSIONS=/path/to/.codex/sessions
 TOKEN_USAGE_HERMES_DB=/path/to/.hermes/state.db
+CODEX_LB_API_KEY=<codex-lb-api-key>
+TOKEN_USAGE_CODEX_LB_URL=http://127.0.0.1:2455
+TOKEN_USAGE_CODEX_LB_API_KEY=<codex-lb-api-key>
 TOKEN_USAGE_DISABLE_JSONL=1
 TOKEN_USAGE_DISABLE_HERMES=1
+TOKEN_USAGE_DISABLE_CODEX_LB=1
 ```
 
 ## HTTP API

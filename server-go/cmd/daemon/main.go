@@ -20,6 +20,7 @@ import (
 	"github.com/codemoo/token-terrier/server-go/internal/api"
 	"github.com/codemoo/token-terrier/server-go/internal/auth"
 	"github.com/codemoo/token-terrier/server-go/internal/burn"
+	"github.com/codemoo/token-terrier/server-go/internal/codexlb"
 	"github.com/codemoo/token-terrier/server-go/internal/hermes"
 	"github.com/codemoo/token-terrier/server-go/internal/jsonl"
 	"github.com/codemoo/token-terrier/server-go/internal/sse"
@@ -88,6 +89,7 @@ func main() {
 
 	claudeState := state.New(wire.ProviderClaude, credStore, usageClient, stateRefresher, claudeBurn, producer, logger)
 	codexState := state.New(wire.ProviderCodex, credStore, usageClient, stateRefresher, codexBurn, producer, logger)
+	codexState.SetLocalSnapshotter(codexlb.NewSnapshotter(producer, logger))
 	claudeHub := sse.NewHub()
 	codexHub := sse.NewHub()
 	srv := api.New(tokens, producer, claudeState, codexState, claudeHub, codexHub, logger)

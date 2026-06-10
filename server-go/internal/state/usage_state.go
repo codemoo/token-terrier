@@ -36,6 +36,7 @@ type State struct {
 	provider    wire.Provider
 	credentials *auth.CredentialStore
 	usageClient *usage.Client
+	localUsage  LocalSnapshotter
 	refresher   Refresher
 	burn        *burn.Tracker
 	producer    wire.ProducerInfo
@@ -70,6 +71,12 @@ type Refresher interface {
 	Refresh(ctx context.Context, c auth.OAuthCredential) (auth.OAuthCredential, error)
 }
 
+// LocalSnapshotter optionally supplies a provider snapshot from a local
+// sidecar/store before the daemon falls back to the upstream usage API.
+type LocalSnapshotter interface {
+	Snapshot(ctx context.Context, seq int, now time.Time) (wire.UsageSnapshot, bool)
+}
+
 // New builds a State for one provider with daemon defaults.
 func New(provider wire.Provider, credentials *auth.CredentialStore, usageClient *usage.Client, refresher Refresher, burnTracker *burn.Tracker, producer wire.ProducerInfo, logger *slog.Logger) *State {
 	if logger == nil {
@@ -91,6 +98,13 @@ func New(provider wire.Provider, credentials *auth.CredentialStore, usageClient 
 		rateLimitBackoff: 300 * time.Second,
 		credentialSkew:   5 * time.Minute,
 	}
+}
+
+// SetLocalSnapshotter configures a local snapshot source for this provider.
+func (s *State) SetLocalSnapshotter(snapshotter LocalSnapshotter) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.localUsage = snapshotter
 }
 
 // IngestEvent records a JSONL token event and returns the resulting
@@ -163,6 +177,7 @@ func mergeBurnInPlace(s wire.UsageSnapshot, b burn.Snapshot) wire.UsageSnapshot 
 // Refresh decides whether to issue a real upstream fetch and returns the
 // resulting UsageUpdate. Mirrors UsageState.refreshSnapshot exactly:
 //
+//   - local snapshotter hit (for example codex-lb) → use it before credential I/O
 //   - cache hit (same account, < cacheTTL since last fetch) → bump seq,
 //     re-merge burn rate, return cached
 //   - rate-limit suspended (recent 429) → same as cache hit
@@ -171,8 +186,13 @@ func mergeBurnInPlace(s wire.UsageSnapshot, b burn.Snapshot) wire.UsageSnapshot 
 //     to stickyTTL
 //   - on auth/credential errors, return degraded immediately
 func (s *State) Refresh(ctx context.Context, now time.Time) UsageUpdate {
-	currentAccount := s.credentials.CurrentAccountKey(ctx, s.provider)
 	burnSnap := s.burn.Snapshot(now)
+
+	if update, ok := s.tryLocalSnapshot(ctx, now, burnSnap); ok {
+		return update
+	}
+
+	currentAccount := s.credentials.CurrentAccountKey(ctx, s.provider)
 
 	s.mu.Lock()
 	isSameAccount := currentAccount != "" && s.cacheAccountKey == currentAccount
@@ -293,6 +313,46 @@ func (s *State) Refresh(ctx context.Context, now time.Time) UsageUpdate {
 	emit := shouldEmitAuthExpired(previousState, raw.Status.State)
 	s.mu.Unlock()
 	return UsageUpdate{Snapshot: merged, EmitAuthExpired: emit}
+}
+
+func (s *State) tryLocalSnapshot(ctx context.Context, now time.Time, burnSnap burn.Snapshot) (UsageUpdate, bool) {
+	s.mu.Lock()
+	localUsage := s.localUsage
+	if localUsage == nil {
+		s.mu.Unlock()
+		return UsageUpdate{}, false
+	}
+	s.seq++
+	seq := s.seq
+	previousState := copyState(s.lastState)
+	s.mu.Unlock()
+
+	raw, ok := localUsage.Snapshot(ctx, seq, now)
+	if !ok {
+		s.mu.Lock()
+		if s.seq == seq {
+			s.seq--
+		}
+		s.mu.Unlock()
+		return UsageUpdate{}, false
+	}
+
+	merged := mergeBurnInPlace(raw, burnSnap)
+	s.mu.Lock()
+	s.latestSnapshot = &merged
+	rawCopy := raw
+	s.lastOkSnapshot = &rawCopy
+	s.lastOkAt = now
+	s.cacheAccountKey = "local"
+	s.lastOkAccountKey = "local"
+	state := raw.Status.State
+	s.lastState = &state
+	if state == wire.StateOK {
+		s.consecutiveAuthExpired = 0
+	}
+	emit := shouldEmitAuthExpired(previousState, raw.Status.State)
+	s.mu.Unlock()
+	return UsageUpdate{Snapshot: merged, EmitAuthExpired: emit}, true
 }
 
 // ConsecutiveAuthExpired returns the count of back-to-back auth-expired
