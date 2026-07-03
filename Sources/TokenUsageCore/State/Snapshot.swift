@@ -116,6 +116,8 @@ public struct AccountUsage: Codable, Equatable, Sendable {
     public let status: String
     public let fiveHour: AccountWindow?
     public let sevenDay: AccountWindow?
+    public let tokensPerHour: Double?
+    public let totalTokens: Int64?
 
     enum CodingKeys: String, CodingKey {
         case number
@@ -124,16 +126,21 @@ public struct AccountUsage: Codable, Equatable, Sendable {
         case status
         case fiveHour = "five_hour"
         case sevenDay = "seven_day"
+        case tokensPerHour = "tokens_per_hour"
+        case totalTokens = "total_tokens"
     }
 
     public init(number: Int, email: String, active: Bool, status: String,
-                fiveHour: AccountWindow?, sevenDay: AccountWindow?) {
+                fiveHour: AccountWindow?, sevenDay: AccountWindow?,
+                tokensPerHour: Double? = nil, totalTokens: Int64? = nil) {
         self.number = number
         self.email = email
         self.active = active
         self.status = status
         self.fiveHour = fiveHour
         self.sevenDay = sevenDay
+        self.tokensPerHour = tokensPerHour
+        self.totalTokens = totalTokens
     }
 }
 
