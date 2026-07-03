@@ -7,6 +7,8 @@ network-touching refresher script and by the unit tests
 or connectivity.
 """
 
+import datetime
+
 
 def to_used_pct(remaining_percent):
     """Convert a codex-lb "remaining percent" (0-100) into a used fraction (0.0-1.0).
@@ -69,16 +71,15 @@ def build_derived(accounts_json, prev_samples, now_ts):
 
         rate = tokens_per_hour(prev_samples.get(account_id), now_sample)
 
-        label = acct.get("alias") or acct.get("displayName") or acct.get("email")
-
         five_hour_pct = to_used_pct(usage.get("primaryRemainingPercent"))
         seven_day_pct = to_used_pct(usage.get("secondaryRemainingPercent"))
 
         derived_accounts.append(
             {
                 "accountId": account_id,
-                "label": label,
                 "email": acct.get("email"),
+                "alias": acct.get("alias"),
+                "displayName": acct.get("displayName"),
                 "status": acct.get("status"),
                 "fiveHourPct": round(five_hour_pct, 6) if five_hour_pct is not None else None,
                 "sevenDayPct": round(seven_day_pct, 6) if seven_day_pct is not None else None,
@@ -91,9 +92,15 @@ def build_derived(accounts_json, prev_samples, now_ts):
         )
 
     derived_accounts.sort(key=lambda a: (a["accountId"] is None, a["accountId"]))
+    for i, a in enumerate(derived_accounts):
+        a["number"] = i + 1
 
+    updated_at = datetime.datetime.fromtimestamp(
+        now_ts, datetime.timezone.utc
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
     derived = {
         "schemaVersion": 1,
+        "accountsUpdatedAt": updated_at,
         "accounts": derived_accounts,
     }
     return derived, new_samples
