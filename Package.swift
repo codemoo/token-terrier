@@ -47,5 +47,10 @@ let package = Package(
             resources: [
                 .copy("Fixtures"),
             ]),
+        .testTarget(
+            name: "token-run-menubarTests",
+            dependencies: [
+                "token-run-menubar",
+            ]),
     ]
 )
