@@ -122,12 +122,13 @@ func (s *State) SetAccountsProvider(p AccountsProvider) {
 	s.accounts = p
 }
 
-// decorateAccounts attaches accounts[] to a Claude snapshot. No-op for Codex
-// or when no provider is set. MUST be called with s.mu UNLOCKED.
+// decorateAccounts attaches accounts[] to a snapshot when an accounts
+// provider is configured for this State's provider (Claude via claude-swap,
+// Codex via codex-lb). Provider-agnostic: it trusts that s.accounts was
+// wired to match this State's provider (see main.go's SetAccountsProvider
+// call sites) — decorateAccounts itself does not gate on wire.Provider.
+// No-op when no provider is set. MUST be called with s.mu UNLOCKED.
 func (s *State) decorateAccounts(snap wire.UsageSnapshot) wire.UsageSnapshot {
-	if snap.Provider != wire.ProviderClaude {
-		return snap
-	}
 	s.mu.Lock()
 	ap := s.accounts
 	s.mu.Unlock()

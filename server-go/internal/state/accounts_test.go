@@ -43,12 +43,27 @@ func TestNoProviderLeavesAccountsNil(t *testing.T) {
 	}
 }
 
-func TestCodexNeverDecorated(t *testing.T) {
+func TestCodexDecoratedWhenProviderSet(t *testing.T) {
 	s := newTestState(wire.ProviderCodex)
-	s.SetAccountsProvider(fakeAccounts{accts: []wire.AccountUsage{{Number: 1, Email: "x@y.com"}}})
+	up := "2026-07-03T09:00:00.000Z"
+	s.SetAccountsProvider(fakeAccounts{
+		accts:   []wire.AccountUsage{{Number: 1, Email: "x@y.com"}},
+		updated: &up,
+	})
 	// Latest is safe without credentials/usage client for this assertion.
 	snap := s.Latest(time.Now())
+	if len(snap.Accounts) != 1 || snap.Accounts[0].Email != "x@y.com" {
+		t.Fatalf("expected codex accounts decorated, got %+v", snap.Accounts)
+	}
+	if snap.AccountsUpdated == nil || *snap.AccountsUpdated != up {
+		t.Fatalf("expected accounts_updated_at, got %v", snap.AccountsUpdated)
+	}
+}
+
+func TestCodexWithoutProviderStaysNil(t *testing.T) {
+	s := newTestState(wire.ProviderCodex)
+	snap := s.Latest(time.Now())
 	if snap.Accounts != nil {
-		t.Fatalf("codex must never carry accounts, got %+v", snap.Accounts)
+		t.Fatalf("codex without accounts provider must stay nil, got %+v", snap.Accounts)
 	}
 }
