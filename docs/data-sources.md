@@ -33,6 +33,20 @@ Token Terrier server-go 가 한 응답을 만들 때 **세 가지 종류**의 so
 - 응답: 5h window, 주간 window, credits (있는 계정만)
 - 파싱: `Sources/TokenUsageCore/Providers/RawUsageResponses.swift` → `UsageNormalizer` → `UsageSnapshot`
 
+### Claude 계정별 사용량 — claude-swap (선택)
+
+`claude-swap`(`cswap`) 이 설치돼 있고 refresher 가 돌면, Claude 스냅샷에 계정별
+사용량(`accounts[]`)이 additive 로 붙는다. **데몬은 `cswap` 을 실행하지 않는다** —
+별도 launchd job(`scripts/claude-swap-refresh.sh`, 기본 5분)이
+`cswap --list --json`(schema v1) 을 `~/.config/token-usage/claude-swap-accounts.json`
+(0600) 에 atomic 하게 기록하고, 데몬의 `internal/claudeswap` reader 가 그 파일만 읽는다.
+
+- 변환: cswap `pct`(0~100) → `used_pct`(0~1), `resetsAt` → 정규 millis-Z.
+- guard: `schemaVersion==1` 만 수용, 계정 0개/파일 없음/파싱 실패 시 accounts 미포함(기존 동작).
+- top-line(5h/주간/burn)은 활성 계정(`~/.claude`) 기준 그대로. accounts[] 는 표시 전용.
+- env: `TOKEN_USAGE_CLAUDE_SWAP_ACCOUNTS`(경로 override), `TOKEN_USAGE_DISABLE_CLAUDE_SWAP=1`(비활성).
+- 설치: `scripts/install-claude-swap-refresh.sh`. 로그/응답에 email 미기록.
+
 ### Codex (ChatGPT) — `https://chatgpt.com/backend-api/wham/usage`
 
 - 인증: 같은 OAuth access token. 단, `auth.json` 의 `auth_mode == "chatgpt"` 여야 함 (apikey 모드는 endpoint 다름)
