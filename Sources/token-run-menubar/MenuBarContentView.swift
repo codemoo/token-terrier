@@ -70,6 +70,13 @@ struct MenuBarContentView: View {
                                 .font(.caption.monospacedDigit())
                         }
                     }
+                    if provider == .claude,
+                       let accounts = snapshot.accounts, !accounts.isEmpty {
+                        Divider().padding(.vertical, 2)
+                        ForEach(accounts, id: \.number) { account in
+                            accountRow(account)
+                        }
+                    }
                 }
             } else {
                 Text(emptyStateText(for: status, provider: provider))
@@ -90,6 +97,47 @@ struct MenuBarContentView: View {
             Text("\(Int(snapshot.burnRatePerMinute)) tok/min")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func accountRow(_ account: AccountUsage) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Image(systemName: account.active ? "largecircle.fill.circle" : "circle")
+                    .font(.caption2)
+                    .foregroundStyle(account.active ? Color.accentColor : .secondary)
+                Text(account.email)
+                    .font(.caption2)
+                    .foregroundStyle(account.active ? .primary : .secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+            }
+            if let label = accountStatusLabel(account.status) {
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else {
+                accountMiniBar(label: "5h", window: account.fiveHour)
+                accountMiniBar(label: "주간", window: account.sevenDay)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func accountMiniBar(label: String, window: AccountWindow?) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(width: 26, alignment: .leading)
+            ProgressView(value: window?.usedPct ?? 0)
+                .progressViewStyle(.linear)
+            Text("\(Int((window?.usedPct ?? 0) * 100))%")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 32, alignment: .trailing)
         }
     }
 

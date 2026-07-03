@@ -55,4 +55,14 @@ final class WireDecodeTests: XCTestCase {
         XCTAssertNil(snap.accounts)
         XCTAssertNil(snap.accountsUpdatedAt)
     }
+
+    func testAccountStatusLabel() {
+        XCTAssertNil(accountStatusLabel("ok"))
+        XCTAssertEqual(accountStatusLabel("api_key"), "할당량 없음")
+        XCTAssertEqual(accountStatusLabel("token_expired"), "토큰 만료")
+        XCTAssertEqual(accountStatusLabel("keychain_unavailable"), "키체인 잠김")
+        XCTAssertEqual(accountStatusLabel("no_credentials"), "자격증명 없음")
+        XCTAssertEqual(accountStatusLabel("unavailable"), "조회 실패")
+        XCTAssertEqual(accountStatusLabel("something_new"), "조회 실패")
+    }
 }

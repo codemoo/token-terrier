@@ -261,3 +261,16 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
             status: SnapshotStatus(state: state, stale: true))
     }
 }
+
+/// Human-readable Korean label for a non-ok claude-swap account status.
+/// Returns nil when status == "ok" (render usage bars instead).
+public func accountStatusLabel(_ status: String) -> String? {
+    switch status {
+    case "ok": return nil
+    case "api_key": return "할당량 없음"
+    case "token_expired": return "토큰 만료"
+    case "keychain_unavailable": return "키체인 잠김"
+    case "no_credentials": return "자격증명 없음"
+    default: return "조회 실패"
+    }
+}
