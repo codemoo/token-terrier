@@ -50,6 +50,8 @@
 - **wire 추가는 additive omitempty 만** — 없을 때 필드 생략되어 Claude·no-codex-accounts 스냅샷 byte-identity 유지.
   - `AccountUsage` 에 `TokensPerHour *float64 json:"tokens_per_hour,omitempty"` (Codex refresher 채움; Claude 는 nil, 앱이 활성계정에 한해 burn 으로 대체).
   - `AccountUsage` 에 `TotalTokens *int64 json:"total_tokens,omitempty"` (Codex 누적; Claude nil).
+  - `AccountUsage` 에 `LastRefreshAt *string json:"last_refresh_at,omitempty"` (**계정별 데이터 갱신 시각/갱신일**). Codex=codex-lb `lastRefreshAt`. Claude=nil → 앱이 스냅샷 단위 `accountsUpdatedAt` 로 폴백.
+- **갱신일 표시(2종):** (1) 윈도우 리셋 "갱신 · N 남음"(계정별, 두 provider `resetsAt` — 상세패널 이미 표시). (2) 데이터 갱신 "N분 전"(계정 `LastRefreshAt` ?? 스냅샷 `accountsUpdatedAt`). Phase 1 에서 Claude 는 (2)를 `accountsUpdatedAt` 로 이미 표시(요약 캡션 + 계정행).
 - **monthly 윈도우 드롭**(v1). 5h(primary)/7d(secondary) 만.
 - codex 계정 → `AccountUsage` 매핑(refresher 가 derived JSON 으로 이미 정규화해서 내려줌 → Go reader 는 단순 파싱):
   - `Number` = `accountId` 안정정렬 synthetic index(ForEach id 안정). email 은 unique 아님 → 키 아님.

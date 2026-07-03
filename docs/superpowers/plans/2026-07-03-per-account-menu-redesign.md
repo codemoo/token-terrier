@@ -205,7 +205,7 @@ HStack(spacing: 0) {
 - Test: `server-go/internal/wire/types_test.go` (byte-identity)
 
 **Interfaces:**
-- Produces: `AccountUsage.TokensPerHour *float64 json:"tokens_per_hour,omitempty"`, `TotalTokens *int64 json:"total_tokens,omitempty"`.
+- Produces: `AccountUsage.TokensPerHour *float64 json:"tokens_per_hour,omitempty"`, `TotalTokens *int64 json:"total_tokens,omitempty"`, `LastRefreshAt *string json:"last_refresh_at,omitempty"` (계정별 데이터 갱신 시각; Codex refresher 가 채움, Claude 은 nil→앱이 snapshot.accountsUpdatedAt 폴백).
 
 - [ ] **Step 1: 실패 테스트** — nil 이면 JSON 에 키 없음(byte-identity), 값 있으면 포함.
 ```go
@@ -222,9 +222,9 @@ func TestAccountUsage_TokenFieldsOmitempty(t *testing.T) {
 }
 ```
 - [ ] **Step 2: 실패 확인** — `go test ./internal/wire/ -run TokenFields` → FAIL.
-- [ ] **Step 3: 구현** — 필드 2개 추가(포인터+omitempty).
+- [ ] **Step 3: 구현** — 필드 3개 추가(`TokensPerHour *float64`, `TotalTokens *int64`, `LastRefreshAt *string`, 모두 포인터+omitempty). Step1 테스트에 `LastRefreshAt` nil→키없음 케이스도 포함.
 - [ ] **Step 4: 통과 확인** → PASS. `go test ./... -race` green.
-- [ ] **Step 5: 커밋** — `feat(server): wire.AccountUsage 에 tokens_per_hour/total_tokens omitempty`.
+- [ ] **Step 5: 커밋** — `feat(server): wire.AccountUsage 에 tokens_per_hour/total_tokens/last_refresh_at omitempty`.
 
 ### Task 8: codex 계정 파일 reader(Go)
 
@@ -233,7 +233,7 @@ func TestAccountUsage_TokenFieldsOmitempty(t *testing.T) {
 - Create: `server-go/internal/codexaccounts/reader_test.go`
 
 **Interfaces:**
-- Consumes: derived JSON `{schemaVersion:1, accountsUpdatedAt, accounts:[{number,accountId,email,alias,displayName,status,fiveHourPct,sevenDayPct,resetAtPrimary,resetAtSecondary,totalTokens,tokensPerHour}]}`.
+- Consumes: derived JSON `{schemaVersion:1, accountsUpdatedAt, accounts:[{number,accountId,email,alias,displayName,status,fiveHourPct,sevenDayPct,resetAtPrimary,resetAtSecondary,totalTokens,tokensPerHour,lastRefreshAt}]}`.
 - Produces: `codexaccounts.NewReader(path string, logger *slog.Logger) *Reader` implementing `state.AccountsProvider` (`Accounts() ([]wire.AccountUsage, *string)`). status `active→ok`; label = alias||displayName||email → `Email` 필드에 표시라벨 넣지 말고 alias 는 별도? (v1: `Email` 에 email, 앱이 alias 우선표시하려면 alias 도 필요 → **매핑: `Email`=email, 그리고 alias 를 위해 `Status` 재활용 금지**. 단순화: v1 은 `Email`=`alias||displayName||email` 로 표시라벨 통일. 아래 테스트 기준.)
 
 - [ ] **Step 1: 실패 테스트** — 파싱/매핑/정규화.
@@ -255,7 +255,7 @@ func TestReader_MapsAndNormalizes(t *testing.T) {
 ```
   **주의(used vs remaining):** refresher(§Task 12)가 codex-lb `primaryRemainingPercent` 를 **used pct(0..1)** 로 이미 변환해 `fiveHourPct`(0..1) 로 내려준다. reader 는 그대로 `AccountWindow.UsedPct` 에 넣는다(재변환 금지). 테스트값도 used 기준으로 맞춘다.
 - [ ] **Step 2: 실패 확인** → FAIL.
-- [ ] **Step 3: 구현** — `internal/claudeswap/reader.go` 패턴 복제(mtime 캐시 + 2s throttle, schemaVersion==1 guard, ENOENT→dormant, keep-last-good on transient stat error). 매핑: `Number`=number(없으면 accountId 안정정렬 index), `Email`=`firstNonEmpty(alias, displayName, email)`, `Active`=status=="active", `Status`=normalize(active→ok), `FiveHour`=fiveHourPct nil?nil:`&AccountWindow{UsedPct:fiveHourPct, ResetsAt:resetAtPrimary}`, `SevenDay` 동일, `TokensPerHour`/`TotalTokens` 포인터 그대로.
+- [ ] **Step 3: 구현** — `internal/claudeswap/reader.go` 패턴 복제(mtime 캐시 + 2s throttle, schemaVersion==1 guard, ENOENT→dormant, keep-last-good on transient stat error). 매핑: `Number`=number(없으면 accountId 안정정렬 index), `Email`=`firstNonEmpty(alias, displayName, email)`, `Active`=status=="active", `Status`=normalize(active→ok), `FiveHour`=fiveHourPct nil?nil:`&AccountWindow{UsedPct:fiveHourPct, ResetsAt:resetAtPrimary}`, `SevenDay` 동일, `TokensPerHour`/`TotalTokens`/`LastRefreshAt` 포인터 그대로(`lastRefreshAt` derived 필드 → wire `LastRefreshAt`).
 - [ ] **Step 4: 통과 확인** → PASS. `-race` green.
 - [ ] **Step 5: 커밋** — `feat(server): codex 계정 파일 reader(status 정규화·매핑·mtime 캐시)`.
 
@@ -301,7 +301,7 @@ if os.Getenv("TOKEN_USAGE_DISABLE_CODEX_ACCOUNTS") != "1" {
 - Produces:
   - `to_used_pct(remaining_percent) -> float|None` = `None if remaining is None else max(0.0,min(1.0,1-remaining/100))`.
   - `tokens_per_hour(prev, now) -> float|None` prev/now = `{"totalTokens":int,"ts":epoch}`; 첫샘플/음수델타/Δt<=0 → None; else `(Δtok)/(Δt/3600)`.
-  - `build_derived(accounts_json, prev_samples, now_ts) -> (derived_dict, new_samples)` — /api/accounts body → derived shape(§spec), accountId 안정정렬 number, alias||displayName||email, used pct 변환, tokensPerHour 델타.
+  - `build_derived(accounts_json, prev_samples, now_ts) -> (derived_dict, new_samples)` — /api/accounts body → derived shape(§spec), accountId 안정정렬 number, alias||displayName||email, used pct 변환, tokensPerHour 델타, **`lastRefreshAt`=계정의 codex-lb `lastRefreshAt` 그대로 전달**.
   - `validate_accounts_payload(obj) -> bool` — top-level `accounts` 가 list.
 
 - [ ] **Step 1: 실패 테스트**
