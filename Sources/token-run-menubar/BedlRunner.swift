@@ -21,6 +21,17 @@ final class BedlFrames {
         self.images = initial.images
         self.idleImage = initial.idleImage
         self.aspectRatio = initial.aspectRatio
+        // Size every frame to the default menu-bar height at load time.
+        // `NSImage(contentsOf:)` returns frames at their native pixel size
+        // (~1450x1088). MenuBarExtra sizes the status item from the label's
+        // intrinsic size (== NSImage.size), and `RunningBedl` only shrinks
+        // via `setHeight` in `.onAppear` — which can race the initial
+        // intrinsic-size measurement. When it loses that race the status
+        // item is created at the native size and rendered off-screen
+        // (observed: size 1450x1088 at position -160,-525 → invisible,
+        // unclickable). Sizing here guarantees a small icon from the very
+        // first render; `.onAppear` still refines to the user's height.
+        setHeight(AppSettings.menuBarBedlHeightDefault)
     }
 
     /// SwiftUI-friendly wrapper. Recomputed each access so SwiftUI sees a new
