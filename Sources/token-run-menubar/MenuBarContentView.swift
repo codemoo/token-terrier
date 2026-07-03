@@ -5,48 +5,92 @@ struct MenuBarContentView: View {
     let appState: AppState
     @Environment(\.openSettings) private var openSettings
 
-    /// Which provider's per-account detail panel is expanded to the right.
-    /// `nil` = collapsed (single 320pt column). Both providers can open a
-    /// panel once their backend ships `accounts[]`; Codex's card still shows
-    /// its aggregate top-line summary (never averaged) rather than switching
-    /// to Claude's per-account average bars.
+    /// Which provider's per-account detail panel is showing.
+    /// `nil` = master overview. Both providers can open a panel once their
+    /// backend ships `accounts[]`; Codex's card still shows its aggregate
+    /// top-line summary (never averaged) rather than switching to Claude's
+    /// per-account average bars.
     @State private var selectedProvider: Provider?
 
+    /// The provider whose detail content stays rendered while the panel slides
+    /// back out on close, so it doesn't blank mid-animation. Updated whenever a
+    /// panel opens; retained through the close transition.
+    @State private var lastDetailProvider: Provider = .claude
+
+    /// Measured height of the master column. The detail panel is pinned to this
+    /// height so opening it is a pure horizontal slide that never resizes the
+    /// window — the menu-bar popover is anchored to its icon, so any width/height
+    /// change visibly shoves the whole window sideways (the jump we're killing).
+    @State private var masterHeight: CGFloat = 0
+
+    /// One fixed column width shared by the master overview and the detail panel.
+    /// Both columns are this width and the window is clipped to it, so selecting a
+    /// card is a horizontal push — the window size stays put.
+    private let columnWidth: CGFloat = 320
+
     var body: some View {
-        ZStack(alignment: .trailing) {
-            // Master card column (always visible)
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                Divider()
-                providerCard(.claude)
-                Divider()
-                providerCard(.codex)
-                Divider()
-                footer
-            }
-            .frame(width: 320)
+        let showingDetail = selectedProvider != nil
+        let detailProvider = selectedProvider ?? lastDetailProvider
 
-            // Detail panel overlays as a floating panel on the right
-            if let provider = selectedProvider,
-               let accounts = appState.status[provider].snapshot?.accounts,
-               !accounts.isEmpty {
-                ZStack(alignment: .topLeading) {
-                    // Dark overlay behind the panel
-                    Color.black.opacity(0.12)
-
-                    AccountDetailPanel(
-                        provider: provider,
-                        accounts: accounts,
-                        activeBurnPerHour: activeBurnPerHour(provider),
-                        accountsUpdatedAt: appState.status[provider].snapshot?.accountsUpdatedAt,
-                        onClose: { selectedProvider = nil })
-                        .frame(width: 300)
-                }
-                .transition(.opacity.combined(with: .move(edge: .trailing)))
-            }
+        // Two equal columns laid side by side; the viewport is clipped to one
+        // column and slid by exactly one column-width. Master slides off to the
+        // left as the detail slides in from the right — a single push, no resize.
+        HStack(spacing: 0) {
+            masterColumn
+                .frame(width: columnWidth)
+                .modifier(MeasureHeight { masterHeight = $0 })
+            detailColumn(for: detailProvider)
+                // Pin the (always-present, usually off-screen) detail column to
+                // the master's height so it scrolls internally instead of
+                // stretching the window. Before the first measurement, collapse
+                // to 1pt where we CAN measure (macOS 15+) so no tall frame flashes
+                // on open; on older macOS fall back to natural height.
+                .frame(
+                    width: columnWidth,
+                    height: masterHeight > 0 ? masterHeight : (supportsHeightMeasure ? 1 : nil))
         }
-        .animation(.easeInOut(duration: 0.18), value: selectedProvider)
+        .frame(width: columnWidth * 2, alignment: .leading)
+        .offset(x: showingDetail ? -columnWidth : 0)
+        .frame(width: columnWidth, alignment: .leading)
+        .clipped()
+        .animation(.easeInOut(duration: 0.22), value: selectedProvider)
         .onDisappear { selectedProvider = nil }
+    }
+
+    /// Whether `onGeometryChange` (macOS 15+) is available to measure the master
+    /// column. Governs the detail panel's pre-measurement height fallback.
+    private var supportsHeightMeasure: Bool {
+        if #available(macOS 15.0, *) { return true } else { return false }
+    }
+
+    private var masterColumn: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            Divider()
+            providerCard(.claude)
+            Divider()
+            providerCard(.codex)
+            Divider()
+            footer
+        }
+    }
+
+    /// The right-hand column. Rendered for `lastDetailProvider` during the close
+    /// slide even after `selectedProvider` goes nil, so the panel keeps its
+    /// contents until it is fully off-screen. Falls back to a blank column if the
+    /// provider somehow has no accounts (kept off-screen by the clip anyway).
+    @ViewBuilder
+    private func detailColumn(for provider: Provider) -> some View {
+        if let accounts = appState.status[provider].snapshot?.accounts, !accounts.isEmpty {
+            AccountDetailPanel(
+                provider: provider,
+                accounts: accounts,
+                activeBurnPerHour: activeBurnPerHour(provider),
+                accountsUpdatedAt: appState.status[provider].snapshot?.accountsUpdatedAt,
+                onClose: { selectedProvider = nil })
+        } else {
+            Color.clear
+        }
     }
 
     /// Tokens/hour for the active account, derived from the aggregate burn rate.
@@ -131,7 +175,12 @@ struct MenuBarContentView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             guard selectable else { return }
-            selectedProvider = (selectedProvider == provider ? nil : provider)
+            if selectedProvider == provider {
+                selectedProvider = nil
+            } else {
+                lastDetailProvider = provider
+                selectedProvider = provider
+            }
         }
     }
 
@@ -155,7 +204,7 @@ struct MenuBarContentView: View {
     }
 
     /// Claude master card: two average usage bars across all "ok" accounts, an
-    /// "N 계정 평균" caption, and a chevron that rotates when its panel is open.
+    /// "N개 계정 · 갱신 …" caption, and a chevron that drills into the detail panel.
     @ViewBuilder
     private func accountsSummary(snapshot: UsageSnapshot, accounts: [AccountUsage], provider: Provider) -> some View {
         if let degraded = degradedMessage(for: snapshot.status.state, provider: provider) {
@@ -187,7 +236,6 @@ struct MenuBarContentView: View {
             Image(systemName: "chevron.right")
                 .font(.caption2.bold())
                 .foregroundStyle(.secondary)
-                .rotationEffect(.degrees(selectedProvider == provider ? 90 : 0))
         }
     }
 
@@ -395,6 +443,22 @@ struct MenuBarContentView: View {
         .padding(.vertical, 8)
     }
 
+}
+
+/// Publishes a view's height to `onChange` so the detail panel can match the
+/// master column, keeping the menu-bar window a fixed size across the horizontal
+/// slide. Uses `onGeometryChange` (macOS 15+) whose action runs on the main
+/// actor; on older macOS it is a no-op and the detail panel uses natural height.
+private struct MeasureHeight: ViewModifier {
+    let onChange: (CGFloat) -> Void
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content.onGeometryChange(for: CGFloat.self, of: { $0.size.height }, action: onChange)
+        } else {
+            content
+        }
+    }
 }
 
 private struct BedlAvatar: View {

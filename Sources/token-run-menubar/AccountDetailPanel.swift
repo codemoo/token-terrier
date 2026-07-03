@@ -39,19 +39,19 @@ struct AccountDetailPanel: View {
     }
 
     private var header: some View {
-        HStack {
-            Text(provider == .claude ? "Claude 계정" : "Codex 계정")
-                .font(.subheadline.bold())
-            Spacer()
+        HStack(spacing: 6) {
             Button {
                 onClose?()
             } label: {
-                Image(systemName: "xmark")
-                    .font(.caption2.bold())
+                Image(systemName: "chevron.backward")
+                    .font(.caption.bold())
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.borderless)
-            .accessibilityLabel("계정 패널 닫기")
+            .accessibilityLabel("개요로 돌아가기")
+            Text(provider == .claude ? "Claude 계정" : "Codex 계정")
+                .font(.subheadline.bold())
+            Spacer()
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
