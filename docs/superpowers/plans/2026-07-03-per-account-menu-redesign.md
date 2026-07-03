@@ -279,7 +279,7 @@ func TestReader_MapsAndNormalizes(t *testing.T) {
 **Files:**
 - Modify: `server-go/cmd/daemon/main.go` (codexState 배선부, ~line 92-100)
 
-- [ ] **Step 1: 구현** — claude-swap 배선 대칭으로:
+- [x] **Step 1: 구현** — claude-swap 배선 대칭으로:
 ```go
 if os.Getenv("TOKEN_USAGE_DISABLE_CODEX_ACCOUNTS") != "1" {
     p := strings.TrimSpace(os.Getenv("TOKEN_USAGE_CODEX_ACCOUNTS"))
@@ -288,8 +288,8 @@ if os.Getenv("TOKEN_USAGE_DISABLE_CODEX_ACCOUNTS") != "1" {
 }
 ```
   import 추가.
-- [ ] **Step 2: 빌드** — `go build ./...` 성공. (파일 없으면 reader dormant → codex accounts nil, 회귀 없음.)
-- [ ] **Step 3: 커밋** — `feat(server): codex accounts provider 배선(env-gate, 기본 경로)`.
+- [x] **Step 2: 빌드** — `go build ./...` 성공. (파일 없으면 reader dormant → codex accounts nil, 회귀 없음.)
+- [x] **Step 3: 커밋** — `feat(server): codex accounts provider 배선(env-gate, 기본 경로)`.
 
 ### Task 11: Python refresher — 델타 계산 유닛(로그인/네트워크 없이)
 

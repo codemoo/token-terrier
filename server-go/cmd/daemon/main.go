@@ -21,6 +21,7 @@ import (
 	"github.com/codemoo/token-terrier/server-go/internal/auth"
 	"github.com/codemoo/token-terrier/server-go/internal/burn"
 	"github.com/codemoo/token-terrier/server-go/internal/claudeswap"
+	"github.com/codemoo/token-terrier/server-go/internal/codexaccounts"
 	"github.com/codemoo/token-terrier/server-go/internal/codexlb"
 	"github.com/codemoo/token-terrier/server-go/internal/hermes"
 	"github.com/codemoo/token-terrier/server-go/internal/jsonl"
@@ -97,6 +98,13 @@ func main() {
 			swapPath = filepath.Join(home, ".config", "token-usage", "claude-swap-accounts.json")
 		}
 		claudeState.SetAccountsProvider(claudeswap.NewReader(swapPath, logger))
+	}
+	if os.Getenv("TOKEN_USAGE_DISABLE_CODEX_ACCOUNTS") != "1" {
+		p := strings.TrimSpace(os.Getenv("TOKEN_USAGE_CODEX_ACCOUNTS"))
+		if p == "" {
+			p = filepath.Join(home, ".config", "token-usage", "codex-lb-accounts.json")
+		}
+		codexState.SetAccountsProvider(codexaccounts.NewReader(p, logger))
 	}
 	claudeHub := sse.NewHub()
 	codexHub := sse.NewHub()
