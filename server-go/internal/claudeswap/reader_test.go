@@ -2,7 +2,10 @@ package claudeswap
 
 import (
 	"math"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 )
 
 const sampleTwoAccounts = `{
@@ -94,5 +97,62 @@ func TestParseAccountsUnparseableResetDropped(t *testing.T) {
 	}
 	if accts[0].SevenDay != nil {
 		t.Fatal("absent sevenDay should be nil")
+	}
+}
+
+func TestReaderReadsFileAndReportsUpdatedAt(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "accounts.json")
+	if err := os.WriteFile(path, []byte(sampleTwoAccounts), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := NewReader(path, nil)
+	accts, updated := r.Accounts()
+	if len(accts) != 2 {
+		t.Fatalf("len = %d, want 2", len(accts))
+	}
+	if updated == nil || *updated == "" {
+		t.Fatal("expected non-nil accounts_updated_at from file mtime")
+	}
+}
+
+func TestReaderMissingFileReturnsNil(t *testing.T) {
+	r := NewReader(filepath.Join(t.TempDir(), "nope.json"), nil)
+	accts, updated := r.Accounts()
+	if accts != nil || updated != nil {
+		t.Fatalf("missing file → (nil,nil), got (%v,%v)", accts, updated)
+	}
+}
+
+func TestReaderReparsesOnMtimeChange(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "accounts.json")
+	if err := os.WriteFile(path, []byte(`{"schemaVersion":1,"accounts":[
+	  {"number":1,"email":"a@b.com","active":true,"usageStatus":"ok","usage":null}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := NewReader(path, nil)
+	r.checkEvery = 0 // disable throttle for the test
+	if accts, _ := r.Accounts(); len(accts) != 1 {
+		t.Fatalf("first read len = %d, want 1", len(accts))
+	}
+	// Rewrite with two accounts and a newer mtime.
+	future := time.Now().Add(2 * time.Second)
+	if err := os.WriteFile(path, []byte(sampleTwoAccounts), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chtimes(path, future, future)
+	if accts, _ := r.Accounts(); len(accts) != 2 {
+		t.Fatalf("after rewrite len = %d, want 2", len(accts))
+	}
+}
+
+func TestReaderWrongSchemaReturnsNil(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "accounts.json")
+	_ = os.WriteFile(path, []byte(`{"schemaVersion":9,"accounts":[]}`), 0o600)
+	r := NewReader(path, nil)
+	if accts, updated := r.Accounts(); accts != nil || updated != nil {
+		t.Fatalf("wrong schema → (nil,nil), got (%v,%v)", accts, updated)
 	}
 }

@@ -6,7 +6,10 @@ package claudeswap
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/codemoo/token-terrier/server-go/internal/wire"
@@ -105,4 +108,74 @@ func clampUnit(v float64) float64 {
 		return 1
 	}
 	return v
+}
+
+// Reader loads the claude-swap accounts file, caching the parsed result and
+// re-reading only when the file's mtime changes. Concurrency-safe. All checks
+// are throttled to at most once per checkEvery to keep hot burn-event paths
+// cheap.
+type Reader struct {
+	path       string
+	logger     *slog.Logger
+	checkEvery time.Duration
+
+	mu            sync.Mutex
+	cachedAccts   []wire.AccountUsage
+	cachedUpdated *string
+	lastMod       time.Time
+	lastCheck     time.Time
+	checked       bool
+}
+
+// NewReader builds a Reader for the given accounts file path.
+func NewReader(path string, logger *slog.Logger) *Reader {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Reader{path: path, logger: logger, checkEvery: 2 * time.Second}
+}
+
+// Accounts returns the current accounts and their file mtime (RFC3339), or
+// (nil, nil) when the file is absent, malformed, wrong-schema, or has no
+// accounts. Never logs emails — count only.
+func (r *Reader) Accounts() ([]wire.AccountUsage, *string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	now := time.Now()
+	if r.checked && now.Sub(r.lastCheck) < r.checkEvery {
+		return r.cachedAccts, r.cachedUpdated
+	}
+	r.checked = true
+	r.lastCheck = now
+
+	info, err := os.Stat(r.path)
+	if err != nil {
+		r.cachedAccts, r.cachedUpdated, r.lastMod = nil, nil, time.Time{}
+		return nil, nil
+	}
+	if !r.lastMod.IsZero() && info.ModTime().Equal(r.lastMod) {
+		return r.cachedAccts, r.cachedUpdated
+	}
+
+	data, err := os.ReadFile(r.path)
+	if err != nil {
+		return r.cachedAccts, r.cachedUpdated // keep last-good on a transient read error
+	}
+	accts, perr := parseAccounts(data)
+	r.lastMod = info.ModTime()
+	if perr != nil {
+		r.logger.Debug("claude-swap accounts parse failed", "err", perr)
+		r.cachedAccts, r.cachedUpdated = nil, nil
+		return nil, nil
+	}
+	r.cachedAccts = accts
+	if accts == nil {
+		r.cachedUpdated = nil
+	} else {
+		u := wire.FormatTime(info.ModTime().UTC())
+		r.cachedUpdated = &u
+	}
+	r.logger.Debug("claude-swap accounts loaded", "count", len(accts))
+	return r.cachedAccts, r.cachedUpdated
 }
