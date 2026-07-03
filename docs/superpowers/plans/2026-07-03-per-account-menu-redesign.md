@@ -236,7 +236,7 @@ func TestAccountUsage_TokenFieldsOmitempty(t *testing.T) {
 - Consumes: derived JSON `{schemaVersion:1, accountsUpdatedAt, accounts:[{number,accountId,email,alias,displayName,status,fiveHourPct,sevenDayPct,resetAtPrimary,resetAtSecondary,totalTokens,tokensPerHour,lastRefreshAt}]}`.
 - Produces: `codexaccounts.NewReader(path string, logger *slog.Logger) *Reader` implementing `state.AccountsProvider` (`Accounts() ([]wire.AccountUsage, *string)`). status `active→ok`; label = alias||displayName||email → `Email` 필드에 표시라벨 넣지 말고 alias 는 별도? (v1: `Email` 에 email, 앱이 alias 우선표시하려면 alias 도 필요 → **매핑: `Email`=email, 그리고 alias 를 위해 `Status` 재활용 금지**. 단순화: v1 은 `Email`=`alias||displayName||email` 로 표시라벨 통일. 아래 테스트 기준.)
 
-- [ ] **Step 1: 실패 테스트** — 파싱/매핑/정규화.
+- [x] **Step 1: 실패 테스트** — 파싱/매핑/정규화.
 ```go
 func TestReader_MapsAndNormalizes(t *testing.T) {
     js := `{"schemaVersion":1,"accountsUpdatedAt":"2026-07-03T13:00:00Z","accounts":[
@@ -254,10 +254,10 @@ func TestReader_MapsAndNormalizes(t *testing.T) {
 }
 ```
   **주의(used vs remaining):** refresher(§Task 12)가 codex-lb `primaryRemainingPercent` 를 **used pct(0..1)** 로 이미 변환해 `fiveHourPct`(0..1) 로 내려준다. reader 는 그대로 `AccountWindow.UsedPct` 에 넣는다(재변환 금지). 테스트값도 used 기준으로 맞춘다.
-- [ ] **Step 2: 실패 확인** → FAIL.
-- [ ] **Step 3: 구현** — `internal/claudeswap/reader.go` 패턴 복제(mtime 캐시 + 2s throttle, schemaVersion==1 guard, ENOENT→dormant, keep-last-good on transient stat error). 매핑: `Number`=number(없으면 accountId 안정정렬 index), `Email`=`firstNonEmpty(alias, displayName, email)`, `Active`=status=="active", `Status`=normalize(active→ok), `FiveHour`=fiveHourPct nil?nil:`&AccountWindow{UsedPct:fiveHourPct, ResetsAt:resetAtPrimary}`, `SevenDay` 동일, `TokensPerHour`/`TotalTokens`/`LastRefreshAt` 포인터 그대로(`lastRefreshAt` derived 필드 → wire `LastRefreshAt`).
-- [ ] **Step 4: 통과 확인** → PASS. `-race` green.
-- [ ] **Step 5: 커밋** — `feat(server): codex 계정 파일 reader(status 정규화·매핑·mtime 캐시)`.
+- [x] **Step 2: 실패 확인** → FAIL.
+- [x] **Step 3: 구현** — `internal/claudeswap/reader.go` 패턴 복제(mtime 캐시 + 2s throttle, schemaVersion==1 guard, ENOENT→dormant, keep-last-good on transient stat error). 매핑: `Number`=number(없으면 accountId 안정정렬 index), `Email`=`firstNonEmpty(alias, displayName, email)`, `Active`=status=="active", `Status`=normalize(active→ok), `FiveHour`=fiveHourPct nil?nil:`&AccountWindow{UsedPct:fiveHourPct, ResetsAt:resetAtPrimary}`, `SevenDay` 동일, `TokensPerHour`/`TotalTokens`/`LastRefreshAt` 포인터 그대로(`lastRefreshAt` derived 필드 → wire `LastRefreshAt`).
+- [x] **Step 4: 통과 확인** → PASS. `-race` green.
+- [x] **Step 5: 커밋** — `feat(server): codex 계정 파일 reader(status 정규화·매핑·mtime 캐시)`.
 
 ### Task 9: `decorateAccounts` provider 가드 완화 + 테스트 교체
 

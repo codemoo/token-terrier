@@ -1,0 +1,182 @@
+// Package codexaccounts reads a codex-lb-accounts derived JSON file (written
+// by scripts/codex-lb-accounts-refresh.py) and exposes per-account Codex
+// usage. It never logs into codex-lb or does network I/O — a separate
+// launchd job keeps the file fresh (see scripts/).
+package codexaccounts
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"log/slog"
+	"os"
+	"sync"
+	"time"
+
+	"github.com/codemoo/token-terrier/server-go/internal/wire"
+)
+
+// codex-lb-accounts derived JSON shape (schemaVersion 1). Only fields we use.
+type derivedList struct {
+	SchemaVersion   int              `json:"schemaVersion"`
+	AccountsUpdated string           `json:"accountsUpdatedAt"`
+	Accounts        []derivedAccount `json:"accounts"`
+}
+
+type derivedAccount struct {
+	Number           int      `json:"number"`
+	AccountID        string   `json:"accountId"`
+	Email            string   `json:"email"`
+	Alias            string   `json:"alias"`
+	DisplayName      string   `json:"displayName"`
+	Status           string   `json:"status"`
+	FiveHourPct      *float64 `json:"fiveHourPct"`
+	SevenDayPct      *float64 `json:"sevenDayPct"`
+	ResetAtPrimary   *string  `json:"resetAtPrimary"`
+	ResetAtSecondary *string  `json:"resetAtSecondary"`
+	TotalTokens      *int64   `json:"totalTokens"`
+	TokensPerHour    *float64 `json:"tokensPerHour"`
+	LastRefreshAt    *string  `json:"lastRefreshAt"`
+}
+
+// parseAccounts converts a codex-lb-accounts derived payload to
+// wire.AccountUsage. Returns (nil, nil) when there are zero accounts; error
+// on malformed JSON or an unsupported schemaVersion.
+func parseAccounts(data []byte) ([]wire.AccountUsage, string, error) {
+	var list derivedList
+	if err := json.Unmarshal(data, &list); err != nil {
+		return nil, "", err
+	}
+	if list.SchemaVersion != 1 {
+		return nil, "", fmt.Errorf("unsupported codex-lb-accounts schemaVersion %d", list.SchemaVersion)
+	}
+	if len(list.Accounts) == 0 {
+		return nil, "", nil
+	}
+	out := make([]wire.AccountUsage, 0, len(list.Accounts))
+	for _, a := range list.Accounts {
+		acc := wire.AccountUsage{
+			Number:        a.Number,
+			Email:         firstNonEmpty(a.Alias, a.DisplayName, a.Email),
+			Active:        a.Status == "active",
+			Status:        normalizeStatus(a.Status),
+			FiveHour:      toWindow(a.FiveHourPct, a.ResetAtPrimary),
+			SevenDay:      toWindow(a.SevenDayPct, a.ResetAtSecondary),
+			TokensPerHour: a.TokensPerHour,
+			TotalTokens:   a.TotalTokens,
+			LastRefreshAt: a.LastRefreshAt,
+		}
+		out = append(out, acc)
+	}
+	return out, list.AccountsUpdated, nil
+}
+
+// toWindow builds an AccountWindow from a nullable used-pct and reset
+// timestamp. pct is passed through as-is — the refresher (not this reader)
+// is responsible for converting codex-lb's remaining-pct into used-pct.
+func toWindow(pct *float64, resetsAt *string) *wire.AccountWindow {
+	if pct == nil {
+		return nil
+	}
+	return &wire.AccountWindow{
+		UsedPct:  *pct,
+		ResetsAt: resetsAt,
+	}
+}
+
+// normalizeStatus maps codex-lb account status to the same vocabulary used
+// by claude-swap accounts ("ok" for a healthy/active account). Unknown
+// statuses pass through unchanged.
+func normalizeStatus(status string) string {
+	if status == "active" {
+		return "ok"
+	}
+	return status
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// Reader loads the codex-lb-accounts derived file, caching the parsed result
+// and re-reading only when the file's mtime changes. Concurrency-safe. All
+// checks are throttled to at most once per checkEvery to keep hot burn-event
+// paths cheap.
+type Reader struct {
+	path       string
+	logger     *slog.Logger
+	checkEvery time.Duration
+
+	mu            sync.Mutex
+	cachedAccts   []wire.AccountUsage
+	cachedUpdated *string
+	lastMod       time.Time
+	lastCheck     time.Time
+	checked       bool
+}
+
+// NewReader builds a Reader for the given codex-lb-accounts derived file
+// path.
+func NewReader(path string, logger *slog.Logger) *Reader {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Reader{path: path, logger: logger, checkEvery: 2 * time.Second}
+}
+
+// Accounts returns the current accounts and accountsUpdatedAt, or (nil, nil)
+// when the file is absent, malformed, wrong-schema, or has no accounts.
+// Never logs emails — count only.
+func (r *Reader) Accounts() ([]wire.AccountUsage, *string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	now := time.Now()
+	if r.checked && now.Sub(r.lastCheck) < r.checkEvery {
+		return r.cachedAccts, r.cachedUpdated
+	}
+	r.checked = true
+	r.lastCheck = now
+
+	info, err := os.Stat(r.path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			// Genuine absence (e.g. refresher not installed) → feature dormant.
+			r.cachedAccts, r.cachedUpdated, r.lastMod = nil, nil, time.Time{}
+			return nil, nil
+		}
+		// Transient stat error (e.g. permission flicker): keep last-good and
+		// don't advance lastMod, so a later successful stat re-parses.
+		return r.cachedAccts, r.cachedUpdated
+	}
+	if !r.lastMod.IsZero() && info.ModTime().Equal(r.lastMod) {
+		return r.cachedAccts, r.cachedUpdated
+	}
+
+	data, err := os.ReadFile(r.path)
+	if err != nil {
+		return r.cachedAccts, r.cachedUpdated // keep last-good on a transient read error
+	}
+	accts, updatedAt, perr := parseAccounts(data)
+	r.lastMod = info.ModTime()
+	if perr != nil {
+		r.logger.Debug("codex-lb accounts parse failed", "err", perr)
+		r.cachedAccts, r.cachedUpdated = nil, nil
+		return nil, nil
+	}
+	r.cachedAccts = accts
+	if accts == nil {
+		r.cachedUpdated = nil
+	} else {
+		u := updatedAt
+		r.cachedUpdated = &u
+	}
+	r.logger.Debug("codex-lb accounts loaded", "count", len(accts))
+	return r.cachedAccts, r.cachedUpdated
+}
