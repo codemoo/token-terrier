@@ -20,6 +20,7 @@ import (
 	"github.com/codemoo/token-terrier/server-go/internal/api"
 	"github.com/codemoo/token-terrier/server-go/internal/auth"
 	"github.com/codemoo/token-terrier/server-go/internal/burn"
+	"github.com/codemoo/token-terrier/server-go/internal/claudeswap"
 	"github.com/codemoo/token-terrier/server-go/internal/codexlb"
 	"github.com/codemoo/token-terrier/server-go/internal/hermes"
 	"github.com/codemoo/token-terrier/server-go/internal/jsonl"
@@ -90,6 +91,13 @@ func main() {
 	claudeState := state.New(wire.ProviderClaude, credStore, usageClient, stateRefresher, claudeBurn, producer, logger)
 	codexState := state.New(wire.ProviderCodex, credStore, usageClient, stateRefresher, codexBurn, producer, logger)
 	codexState.SetLocalSnapshotter(codexlb.NewSnapshotter(producer, logger))
+	if os.Getenv("TOKEN_USAGE_DISABLE_CLAUDE_SWAP") != "1" {
+		swapPath := strings.TrimSpace(os.Getenv("TOKEN_USAGE_CLAUDE_SWAP_ACCOUNTS"))
+		if swapPath == "" {
+			swapPath = filepath.Join(home, ".config", "token-usage", "claude-swap-accounts.json")
+		}
+		claudeState.SetAccountsProvider(claudeswap.NewReader(swapPath, logger))
+	}
 	claudeHub := sse.NewHub()
 	codexHub := sse.NewHub()
 	srv := api.New(tokens, producer, claudeState, codexState, claudeHub, codexHub, logger)
