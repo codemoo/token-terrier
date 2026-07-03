@@ -31,6 +31,7 @@ struct MenuBarContentView: View {
                     provider: provider,
                     accounts: accounts,
                     activeBurnPerHour: activeBurnPerHour(provider),
+                    accountsUpdatedAt: appState.status[provider].snapshot?.accountsUpdatedAt,
                     onClose: { selectedProvider = nil })
                     .frame(width: 300)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -151,15 +152,37 @@ struct MenuBarContentView: View {
         averageBar(label: "5h", value: AccountAverages.fiveHour(accounts))
         averageBar(label: "주간", value: AccountAverages.sevenDay(accounts))
         HStack {
-            Text("\(accounts.count) 계정 평균")
+            Text("\(accounts.count)개 계정")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+            if let updatedCaption = Self.freshnessCaption(snapshot.accountsUpdatedAt, now: .now) {
+                Text("· \(updatedCaption)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
             Spacer()
             Image(systemName: "chevron.right")
                 .font(.caption2.bold())
                 .foregroundStyle(.secondary)
                 .rotationEffect(.degrees(selectedProvider == provider ? 90 : 0))
         }
+    }
+
+    /// Formats an ISO8601 timestamp as a short relative-past caption, e.g.
+    /// "갱신 3분 전". Returns nil when the string is missing or unparsable so
+    /// callers can simply omit the caption.
+    static func freshnessCaption(_ isoString: String?, now: Date) -> String? {
+        guard let isoString, let date = SnapshotDateFormatter.date(from: isoString) else { return nil }
+        return "갱신 \(relativePast(date, now: now))"
+    }
+
+    /// "방금" / "N분 전" / "N시간 전" / "N일 전" relative-past label.
+    static func relativePast(_ date: Date, now: Date) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(date)))
+        if seconds < 60 { return "방금" }
+        if seconds < 3_600 { return "\(seconds / 60)분 전" }
+        if seconds < 86_400 { return "\(seconds / 3_600)시간 전" }
+        return "\(seconds / 86_400)일 전"
     }
 
     @ViewBuilder

@@ -10,6 +10,9 @@ struct AccountDetailPanel: View {
     /// Tokens/hour for the currently active account (aggregate burn). Non-active
     /// accounts fall back to their own `tokensPerHour` when present.
     let activeBurnPerHour: Double?
+    /// Snapshot-level fallback freshness timestamp, used when an individual
+    /// account has no `lastRefreshAt` of its own.
+    var accountsUpdatedAt: String?
     var onClose: (() -> Void)?
 
     var body: some View {
@@ -86,6 +89,23 @@ struct AccountDetailPanel: View {
                 miniBar(label: "5h", window: account.fiveHour)
                 miniBar(label: "주간", window: account.sevenDay)
                 resetLine(account)
+                freshnessLine(account)
+            }
+        }
+    }
+
+    /// "데이터 갱신: N분 전" line. Prefers the account's own refresh timestamp,
+    /// falling back to the snapshot-level one; omitted entirely when both are
+    /// missing/unparsable.
+    @ViewBuilder
+    private func freshnessLine(_ account: AccountUsage) -> some View {
+        if let isoString = account.lastRefreshAt ?? accountsUpdatedAt,
+           let date = SnapshotDateFormatter.date(from: isoString) {
+            TimelineView(.periodic(from: .now, by: 30)) { context in
+                Text("데이터 갱신: \(MenuBarContentView.relativePast(date, now: context.date))")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
     }
