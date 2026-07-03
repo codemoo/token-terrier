@@ -9,6 +9,12 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPT="${ROOT}/scripts/claude-swap-refresh.sh"
 PLIST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
 INTERVAL="${REFRESH_INTERVAL:-300}"
+case "$INTERVAL" in
+	''|0|*[!0-9]*)
+		echo "install-claude-swap-refresh: REFRESH_INTERVAL must be a positive integer, got '${INTERVAL}'" >&2
+		exit 1
+		;;
+esac
 LOGDIR="${HOME}/Library/Logs/token-terrier"
 
 chmod +x "$SCRIPT"

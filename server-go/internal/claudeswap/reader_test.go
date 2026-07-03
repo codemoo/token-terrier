@@ -147,6 +147,26 @@ func TestReaderReparsesOnMtimeChange(t *testing.T) {
 	}
 }
 
+func TestReaderFileDeletedAfterGoodReadClears(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "accounts.json")
+	if err := os.WriteFile(path, []byte(sampleTwoAccounts), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := NewReader(path, nil)
+	r.checkEvery = 0 // disable throttle for the test
+	if accts, _ := r.Accounts(); len(accts) != 2 {
+		t.Fatalf("first read len = %d, want 2", len(accts))
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	accts, updated := r.Accounts()
+	if accts != nil || updated != nil {
+		t.Fatalf("after delete → (nil,nil), got (%v,%v)", accts, updated)
+	}
+}
+
 func TestReaderWrongSchemaReturnsNil(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "accounts.json")

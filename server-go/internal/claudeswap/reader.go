@@ -5,7 +5,9 @@ package claudeswap
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"strings"
@@ -151,8 +153,14 @@ func (r *Reader) Accounts() ([]wire.AccountUsage, *string) {
 
 	info, err := os.Stat(r.path)
 	if err != nil {
-		r.cachedAccts, r.cachedUpdated, r.lastMod = nil, nil, time.Time{}
-		return nil, nil
+		if errors.Is(err, fs.ErrNotExist) {
+			// Genuine absence (e.g. claude-swap uninstalled) → feature dormant.
+			r.cachedAccts, r.cachedUpdated, r.lastMod = nil, nil, time.Time{}
+			return nil, nil
+		}
+		// Transient stat error (e.g. permission flicker): keep last-good and
+		// don't advance lastMod, so a later successful stat re-parses.
+		return r.cachedAccts, r.cachedUpdated
 	}
 	if !r.lastMod.IsZero() && info.ModTime().Equal(r.lastMod) {
 		return r.cachedAccts, r.cachedUpdated
