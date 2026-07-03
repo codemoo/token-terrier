@@ -5,17 +5,59 @@ struct MenuBarContentView: View {
     let appState: AppState
     @Environment(\.openSettings) private var openSettings
 
+    /// Which provider's per-account detail panel is expanded to the right.
+    /// `nil` = collapsed (single 320pt column). Both providers can open a
+    /// panel once their backend ships `accounts[]`; Codex's card still shows
+    /// its aggregate top-line summary (never averaged) rather than switching
+    /// to Claude's per-account average bars.
+    @State private var selectedProvider: Provider?
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            Divider()
-            providerCard(.claude)
-            Divider()
-            providerCard(.codex)
-            Divider()
-            footer
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                Divider()
+                providerCard(.claude)
+                Divider()
+                providerCard(.codex)
+                Divider()
+                footer
+            }
+            .frame(width: 320)
+
+            if let provider = selectedProvider,
+               let accounts = appState.status[provider].snapshot?.accounts,
+               !accounts.isEmpty {
+                Divider()
+                AccountDetailPanel(
+                    provider: provider,
+                    accounts: accounts,
+                    activeBurnPerHour: activeBurnPerHour(provider),
+                    accountsUpdatedAt: appState.status[provider].snapshot?.accountsUpdatedAt,
+                    onClose: { selectedProvider = nil })
+                    .frame(width: 300)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
-        .frame(width: 320)
+        .animation(.easeInOut(duration: 0.18), value: selectedProvider)
+        .clipped()
+        .onDisappear { selectedProvider = nil }
+    }
+
+    /// Tokens/hour for the active account, derived from the aggregate burn rate.
+    /// Only Claude exposes a live burn rate in Phase 1; Codex returns nil until
+    /// Phase 2 wires per-account rates.
+    private func activeBurnPerHour(_ provider: Provider) -> Double? {
+        guard provider == .claude,
+              let snapshot = appState.status[provider].snapshot else { return nil }
+        return snapshot.burnRatePerMinute * 60
+    }
+
+    /// A card can be tapped to open its detail panel only when it actually has
+    /// per-account rows to show. Phase 2: both providers, once their daemon
+    /// backend ships `accounts[]` (Codex via the codex-lb refresher).
+    private func isSelectable(_ provider: Provider) -> Bool {
+        return appState.status[provider].snapshot?.accounts?.isEmpty == false
     }
 
     private var header: some View {
@@ -43,6 +85,7 @@ struct MenuBarContentView: View {
     @ViewBuilder
     private func providerCard(_ provider: Provider) -> some View {
         let status = appState.status[provider]
+        let selectable = isSelectable(provider)
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(provider == .claude ? "Claude Code" : "Codex")
@@ -52,30 +95,25 @@ struct MenuBarContentView: View {
             }
 
             if let snapshot = status.snapshot {
-                if let degraded = degradedMessage(for: snapshot.status.state, provider: provider) {
+                let accounts = snapshot.accounts ?? []
+                if provider == .claude, !accounts.isEmpty {
+                    // Claude master card = per-account averages + affordance to
+                    // expand the detail panel. A degraded state (auth/network)
+                    // becomes a small inline note instead of hiding the whole
+                    // card, because claude-swap still ships per-account rows in
+                    // that case.
+                    accountsSummary(snapshot: snapshot, accounts: accounts, provider: provider)
+                } else if let degraded = degradedMessage(for: snapshot.status.state, provider: provider) {
                     Text(degraded)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    metricsRow(snapshot: snapshot)
-                    quotaRow(label: "5h", window: snapshot.rolling5h)
-                    quotaRow(label: "주간", window: snapshot.weekly)
-                    if let credits = snapshot.credits {
-                        HStack {
-                            Text("Credits")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Text(String(format: "%.1f", credits.remaining))
-                                .font(.caption.monospacedDigit())
-                        }
-                    }
-                    if provider == .claude,
-                       let accounts = snapshot.accounts, !accounts.isEmpty {
-                        Divider().padding(.vertical, 2)
-                        ForEach(accounts, id: \.number) { account in
-                            accountRow(account)
-                        }
+                    // Codex keeps its aggregate top-line summary (never
+                    // averaged) even when per-account rows exist; the accounts
+                    // are only surfaced via the detail panel's `▸`.
+                    aggregateMetrics(snapshot: snapshot)
+                    if provider != .claude, !accounts.isEmpty {
+                        accountsAffordance(count: accounts.count, updatedAt: snapshot.accountsUpdatedAt, provider: provider)
                     }
                 }
             } else {
@@ -85,8 +123,108 @@ struct MenuBarContentView: View {
             }
         }
         .padding(12)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard selectable else { return }
+            selectedProvider = (selectedProvider == provider ? nil : provider)
+        }
     }
 
+    /// The original aggregate top-line (burn + 5h/weekly + credits). Still used
+    /// by Codex and by Claude when no per-account rows are available.
+    @ViewBuilder
+    private func aggregateMetrics(snapshot: UsageSnapshot) -> some View {
+        metricsRow(snapshot: snapshot)
+        quotaRow(label: "5h", window: snapshot.rolling5h)
+        quotaRow(label: "주간", window: snapshot.weekly)
+        if let credits = snapshot.credits {
+            HStack {
+                Text("Credits")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(String(format: "%.1f", credits.remaining))
+                    .font(.caption.monospacedDigit())
+            }
+        }
+    }
+
+    /// Claude master card: two average usage bars across all "ok" accounts, an
+    /// "N 계정 평균" caption, and a chevron that rotates when its panel is open.
+    @ViewBuilder
+    private func accountsSummary(snapshot: UsageSnapshot, accounts: [AccountUsage], provider: Provider) -> some View {
+        if let degraded = degradedMessage(for: snapshot.status.state, provider: provider) {
+            Text(degraded)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        averageBar(label: "5h", value: AccountAverages.fiveHour(accounts))
+        averageBar(label: "주간", value: AccountAverages.sevenDay(accounts))
+        accountsAffordance(count: accounts.count, updatedAt: snapshot.accountsUpdatedAt, provider: provider)
+    }
+
+    /// "N개 계정 · 갱신 X분 전" caption + chevron affordance that opens the
+    /// detail panel. Shared by the Claude average card and the Codex
+    /// aggregate card (Codex keeps its top-line but still gets this row once
+    /// it has per-account data to show).
+    @ViewBuilder
+    private func accountsAffordance(count: Int, updatedAt: String?, provider: Provider) -> some View {
+        HStack {
+            Text("\(count)개 계정")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            if let updatedCaption = Self.freshnessCaption(updatedAt, now: .now) {
+                Text("· \(updatedCaption)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption2.bold())
+                .foregroundStyle(.secondary)
+                .rotationEffect(.degrees(selectedProvider == provider ? 90 : 0))
+        }
+    }
+
+    /// Formats an ISO8601 timestamp as a short relative-past caption, e.g.
+    /// "갱신 3분 전". Returns nil when the string is missing or unparsable so
+    /// callers can simply omit the caption.
+    static func freshnessCaption(_ isoString: String?, now: Date) -> String? {
+        guard let isoString, let date = SnapshotDateFormatter.date(from: isoString) else { return nil }
+        return "갱신 \(relativePast(date, now: now))"
+    }
+
+    /// "방금" / "N분 전" / "N시간 전" / "N일 전" relative-past label.
+    static func relativePast(_ date: Date, now: Date) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(date)))
+        if seconds < 60 { return "방금" }
+        if seconds < 3_600 { return "\(seconds / 60)분 전" }
+        if seconds < 86_400 { return "\(seconds / 3_600)시간 전" }
+        return "\(seconds / 86_400)일 전"
+    }
+
+    @ViewBuilder
+    private func averageBar(label: String, value: Double?) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 32, alignment: .leading)
+            if let value {
+                ProgressView(value: value)
+                    .progressViewStyle(.linear)
+                Text("\(Int(value * 100))%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, alignment: .trailing)
+            } else {
+                Text("데이터 없음")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
 
     private func metricsRow(snapshot: UsageSnapshot) -> some View {
         HStack {
@@ -97,47 +235,6 @@ struct MenuBarContentView: View {
             Text("\(Int(snapshot.burnRatePerMinute)) tok/min")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
-        }
-    }
-
-    @ViewBuilder
-    private func accountRow(_ account: AccountUsage) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 4) {
-                Image(systemName: account.active ? "largecircle.fill.circle" : "circle")
-                    .font(.caption2)
-                    .foregroundStyle(account.active ? Color.accentColor : .secondary)
-                Text(account.email)
-                    .font(.caption2)
-                    .foregroundStyle(account.active ? .primary : .secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer()
-            }
-            if let label = accountStatusLabel(account.status) {
-                Text(label)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            } else {
-                accountMiniBar(label: "5h", window: account.fiveHour)
-                accountMiniBar(label: "주간", window: account.sevenDay)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func accountMiniBar(label: String, window: AccountWindow?) -> some View {
-        HStack(spacing: 6) {
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .frame(width: 26, alignment: .leading)
-            ProgressView(value: window?.usedPct ?? 0)
-                .progressViewStyle(.linear)
-            Text("\(Int((window?.usedPct ?? 0) * 100))%")
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 32, alignment: .trailing)
         }
     }
 
@@ -174,7 +271,7 @@ struct MenuBarContentView: View {
     /// "오늘 18:51 갱신 · 3시간 12분 남음" 같은 한 줄을 만든다.
     /// `resetsAt`이 이미 지났거나 음수면 그냥 빈 문자열을 반환하지 않고
     /// "갱신 대기" 메시지를 띄워 사용자에게 무언가가 stale 상태임을 알린다.
-    private static func resetText(at resetsAt: Date, now: Date) -> String {
+    static func resetText(at resetsAt: Date, now: Date) -> String {
         let calendar = Calendar(identifier: .gregorian)
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "ko_KR")
@@ -198,7 +295,7 @@ struct MenuBarContentView: View {
         return "\(absolute) 갱신 · \(remainingHuman(seconds: secondsRemaining)) 남음"
     }
 
-    private static func remainingHuman(seconds: Int) -> String {
+    static func remainingHuman(seconds: Int) -> String {
         if seconds < 60 { return "\(seconds)초" }
         if seconds < 3_600 { return "\(seconds / 60)분" }
         if seconds < 86_400 {

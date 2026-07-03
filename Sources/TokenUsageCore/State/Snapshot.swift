@@ -116,6 +116,9 @@ public struct AccountUsage: Codable, Equatable, Sendable {
     public let status: String
     public let fiveHour: AccountWindow?
     public let sevenDay: AccountWindow?
+    public let tokensPerHour: Double?
+    public let totalTokens: Int64?
+    public let lastRefreshAt: String?
 
     enum CodingKeys: String, CodingKey {
         case number
@@ -124,16 +127,24 @@ public struct AccountUsage: Codable, Equatable, Sendable {
         case status
         case fiveHour = "five_hour"
         case sevenDay = "seven_day"
+        case tokensPerHour = "tokens_per_hour"
+        case totalTokens = "total_tokens"
+        case lastRefreshAt = "last_refresh_at"
     }
 
     public init(number: Int, email: String, active: Bool, status: String,
-                fiveHour: AccountWindow?, sevenDay: AccountWindow?) {
+                fiveHour: AccountWindow?, sevenDay: AccountWindow?,
+                tokensPerHour: Double? = nil, totalTokens: Int64? = nil,
+                lastRefreshAt: String? = nil) {
         self.number = number
         self.email = email
         self.active = active
         self.status = status
         self.fiveHour = fiveHour
         self.sevenDay = sevenDay
+        self.tokensPerHour = tokensPerHour
+        self.totalTokens = totalTokens
+        self.lastRefreshAt = lastRefreshAt
     }
 }
 
@@ -262,15 +273,23 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
     }
 }
 
-/// Human-readable Korean label for a non-ok claude-swap account status.
-/// Returns nil when status == "ok" (render usage bars instead).
+/// Human-readable Korean label for a non-ok account status (claude-swap or
+/// codex-lb). Returns nil when status == "ok" (render usage bars instead).
 public func accountStatusLabel(_ status: String) -> String? {
     switch status {
     case "ok": return nil
+    // claude-swap statuses
     case "api_key": return "할당량 없음"
     case "token_expired": return "토큰 만료"
     case "keychain_unavailable": return "키체인 잠김"
     case "no_credentials": return "자격증명 없음"
+    // codex-lb statuses (see server-go/internal/codexaccounts/reader.go
+    // normalizeStatus — "active" is remapped to "ok" before this is called;
+    // everything else passes through unchanged from codex-lb).
+    case "paused": return "일시중지"
+    case "deactivated": return "비활성화"
+    case "error": return "오류"
+    case "rate_limited": return "레이트리밋"
     default: return "조회 실패"
     }
 }
