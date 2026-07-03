@@ -37,6 +37,7 @@ type State struct {
 	credentials *auth.CredentialStore
 	usageClient *usage.Client
 	localUsage  LocalSnapshotter
+	accounts    AccountsProvider
 	refresher   Refresher
 	burn        *burn.Tracker
 	producer    wire.ProducerInfo
@@ -77,6 +78,13 @@ type LocalSnapshotter interface {
 	Snapshot(ctx context.Context, seq int, now time.Time) (wire.UsageSnapshot, bool)
 }
 
+// AccountsProvider optionally supplies per-account usage rows to attach to a
+// Claude snapshot (claude-swap integration). Implemented by
+// internal/claudeswap.Reader.
+type AccountsProvider interface {
+	Accounts() ([]wire.AccountUsage, *string)
+}
+
 // New builds a State for one provider with daemon defaults.
 func New(provider wire.Provider, credentials *auth.CredentialStore, usageClient *usage.Client, refresher Refresher, burnTracker *burn.Tracker, producer wire.ProducerInfo, logger *slog.Logger) *State {
 	if logger == nil {
@@ -107,10 +115,52 @@ func (s *State) SetLocalSnapshotter(snapshotter LocalSnapshotter) {
 	s.localUsage = snapshotter
 }
 
-// IngestEvent records a JSONL token event and returns the resulting
+// SetAccountsProvider configures the per-account usage source (Claude only).
+func (s *State) SetAccountsProvider(p AccountsProvider) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.accounts = p
+}
+
+// decorateAccounts attaches accounts[] to a Claude snapshot. No-op for Codex
+// or when no provider is set. MUST be called with s.mu UNLOCKED.
+func (s *State) decorateAccounts(snap wire.UsageSnapshot) wire.UsageSnapshot {
+	if snap.Provider != wire.ProviderClaude {
+		return snap
+	}
+	s.mu.Lock()
+	ap := s.accounts
+	s.mu.Unlock()
+	if ap == nil {
+		return snap
+	}
+	accts, updated := ap.Accounts()
+	snap.Accounts = accts
+	snap.AccountsUpdated = updated
+	return snap
+}
+
+// Refresh runs the fetch/cache/sticky pipeline, then attaches accounts[].
+func (s *State) Refresh(ctx context.Context, now time.Time) UsageUpdate {
+	u := s.refreshInner(ctx, now)
+	u.Snapshot = s.decorateAccounts(u.Snapshot)
+	return u
+}
+
+// IngestEvent records a token event, then attaches accounts[].
+func (s *State) IngestEvent(ev jsonl.TokenEvent, now time.Time) wire.UsageSnapshot {
+	return s.decorateAccounts(s.ingestEventInner(ev, now))
+}
+
+// Latest returns the cached snapshot with live burn + accounts[].
+func (s *State) Latest(now time.Time) wire.UsageSnapshot {
+	return s.decorateAccounts(s.latestInner(now))
+}
+
+// ingestEventInner records a JSONL token event and returns the resulting
 // snapshot (with bumped seq + fresh burn rate). The daemon's main routes
 // this through the SSE hub so menubar clients see live burn rate updates.
-func (s *State) IngestEvent(ev jsonl.TokenEvent, now time.Time) wire.UsageSnapshot {
+func (s *State) ingestEventInner(ev jsonl.TokenEvent, now time.Time) wire.UsageSnapshot {
 	burnSnap := s.burn.Ingest(ev, now)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -144,10 +194,10 @@ func mergeBurn(s wire.UsageSnapshot, b burn.Snapshot, seq int, now time.Time) wi
 	return s
 }
 
-// Latest returns the most recent snapshot merged with the live burn rate.
-// If none has been fetched yet, returns a degraded snapshot in networkError
-// state.
-func (s *State) Latest(now time.Time) wire.UsageSnapshot {
+// latestInner returns the most recent snapshot merged with the live burn
+// rate. If none has been fetched yet, returns a degraded snapshot in
+// networkError state.
+func (s *State) latestInner(now time.Time) wire.UsageSnapshot {
 	burnSnap := s.burn.Snapshot(now)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -174,8 +224,8 @@ func mergeBurnInPlace(s wire.UsageSnapshot, b burn.Snapshot) wire.UsageSnapshot 
 	return s
 }
 
-// Refresh decides whether to issue a real upstream fetch and returns the
-// resulting UsageUpdate. Mirrors UsageState.refreshSnapshot exactly:
+// refreshInner decides whether to issue a real upstream fetch and returns
+// the resulting UsageUpdate. Mirrors UsageState.refreshSnapshot exactly:
 //
 //   - local snapshotter hit (for example codex-lb) → use it before credential I/O
 //   - cache hit (same account, < cacheTTL since last fetch) → bump seq,
@@ -185,7 +235,7 @@ func mergeBurnInPlace(s wire.UsageSnapshot, b burn.Snapshot) wire.UsageSnapshot 
 //   - on transient error (network/server), serve sticky last-good for up
 //     to stickyTTL
 //   - on auth/credential errors, return degraded immediately
-func (s *State) Refresh(ctx context.Context, now time.Time) UsageUpdate {
+func (s *State) refreshInner(ctx context.Context, now time.Time) UsageUpdate {
 	burnSnap := s.burn.Snapshot(now)
 
 	if update, ok := s.tryLocalSnapshot(ctx, now, burnSnap); ok {
