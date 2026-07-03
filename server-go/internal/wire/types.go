@@ -70,12 +70,15 @@ type AccountWindow struct {
 // under a Claude snapshot's accounts[]. Status mirrors cswap usageStatus:
 // ok | token_expired | api_key | keychain_unavailable | no_credentials | unavailable.
 type AccountUsage struct {
-	Number   int            `json:"number"`
-	Email    string         `json:"email"`
-	Active   bool           `json:"active"`
-	Status   string         `json:"status"`
-	FiveHour *AccountWindow `json:"five_hour"`
-	SevenDay *AccountWindow `json:"seven_day"`
+	Number        int            `json:"number"`
+	Email         string         `json:"email"`
+	Active        bool           `json:"active"`
+	Status        string         `json:"status"`
+	FiveHour      *AccountWindow `json:"five_hour"`
+	SevenDay      *AccountWindow `json:"seven_day"`
+	TokensPerHour *float64       `json:"tokens_per_hour,omitempty"`
+	TotalTokens   *int64         `json:"total_tokens,omitempty"`
+	LastRefreshAt *string        `json:"last_refresh_at,omitempty"`
 }
 
 // Credits captures credit balance information when a provider exposes it.

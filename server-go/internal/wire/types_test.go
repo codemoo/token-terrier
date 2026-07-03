@@ -38,3 +38,17 @@ func TestUsageSnapshotIncludesAccountsWhenSet(t *testing.T) {
 		}
 	}
 }
+
+func TestAccountUsage_TokenFieldsOmitempty(t *testing.T) {
+	b, _ := json.Marshal(AccountUsage{Number: 1, Email: "a@x", Active: true, Status: "ok"})
+	if strings.Contains(string(b), "tokens_per_hour") || strings.Contains(string(b), "total_tokens") || strings.Contains(string(b), "last_refresh_at") {
+		t.Fatalf("nil 필드가 새어나옴: %s", b)
+	}
+	tph := 1.5
+	tt := int64(9)
+	lra := "2026-07-03T13:00:00Z"
+	b2, _ := json.Marshal(AccountUsage{Number: 1, Email: "a@x", Active: true, Status: "ok", TokensPerHour: &tph, TotalTokens: &tt, LastRefreshAt: &lra})
+	if !strings.Contains(string(b2), `"tokens_per_hour":1.5`) || !strings.Contains(string(b2), `"total_tokens":9`) || !strings.Contains(string(b2), `"last_refresh_at":"2026-07-03T13:00:00Z"`) {
+		t.Fatalf("값 필드 누락: %s", b2)
+	}
+}
