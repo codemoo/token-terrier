@@ -13,7 +13,8 @@ struct MenuBarContentView: View {
     @State private var selectedProvider: Provider?
 
     var body: some View {
-        HStack(spacing: 0) {
+        ZStack(alignment: .trailing) {
+            // Master card column (always visible)
             VStack(alignment: .leading, spacing: 0) {
                 header
                 Divider()
@@ -25,22 +26,26 @@ struct MenuBarContentView: View {
             }
             .frame(width: 320)
 
+            // Detail panel overlays as a floating panel on the right
             if let provider = selectedProvider,
                let accounts = appState.status[provider].snapshot?.accounts,
                !accounts.isEmpty {
-                Divider()
-                AccountDetailPanel(
-                    provider: provider,
-                    accounts: accounts,
-                    activeBurnPerHour: activeBurnPerHour(provider),
-                    accountsUpdatedAt: appState.status[provider].snapshot?.accountsUpdatedAt,
-                    onClose: { selectedProvider = nil })
-                    .frame(width: 300)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                ZStack(alignment: .topLeading) {
+                    // Dark overlay behind the panel
+                    Color.black.opacity(0.12)
+
+                    AccountDetailPanel(
+                        provider: provider,
+                        accounts: accounts,
+                        activeBurnPerHour: activeBurnPerHour(provider),
+                        accountsUpdatedAt: appState.status[provider].snapshot?.accountsUpdatedAt,
+                        onClose: { selectedProvider = nil })
+                        .frame(width: 300)
+                }
+                .transition(.opacity.combined(with: .move(edge: .trailing)))
             }
         }
         .animation(.easeInOut(duration: 0.18), value: selectedProvider)
-        .clipped()
         .onDisappear { selectedProvider = nil }
     }
 
