@@ -6,8 +6,10 @@ struct MenuBarContentView: View {
     @Environment(\.openSettings) private var openSettings
 
     /// Which provider's per-account detail panel is expanded to the right.
-    /// `nil` = collapsed (single 320pt column). Only Claude opens a panel in
-    /// Phase 1; Codex keeps its aggregate top-line card.
+    /// `nil` = collapsed (single 320pt column). Both providers can open a
+    /// panel once their backend ships `accounts[]`; Codex's card still shows
+    /// its aggregate top-line summary (never averaged) rather than switching
+    /// to Claude's per-account average bars.
     @State private var selectedProvider: Provider?
 
     var body: some View {
@@ -52,9 +54,9 @@ struct MenuBarContentView: View {
     }
 
     /// A card can be tapped to open its detail panel only when it actually has
-    /// per-account rows to show. Phase 1: Claude only.
+    /// per-account rows to show. Phase 2: both providers, once their daemon
+    /// backend ships `accounts[]` (Codex via the codex-lb refresher).
     private func isSelectable(_ provider: Provider) -> Bool {
-        guard provider == .claude else { return false }
         return appState.status[provider].snapshot?.accounts?.isEmpty == false
     }
 
@@ -95,17 +97,24 @@ struct MenuBarContentView: View {
             if let snapshot = status.snapshot {
                 let accounts = snapshot.accounts ?? []
                 if provider == .claude, !accounts.isEmpty {
-                    // Master card = per-account averages + affordance to expand
-                    // the detail panel. A degraded state (auth/network) becomes a
-                    // small inline note instead of hiding the whole card, because
-                    // claude-swap still ships per-account rows in that case.
+                    // Claude master card = per-account averages + affordance to
+                    // expand the detail panel. A degraded state (auth/network)
+                    // becomes a small inline note instead of hiding the whole
+                    // card, because claude-swap still ships per-account rows in
+                    // that case.
                     accountsSummary(snapshot: snapshot, accounts: accounts, provider: provider)
                 } else if let degraded = degradedMessage(for: snapshot.status.state, provider: provider) {
                     Text(degraded)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
+                    // Codex keeps its aggregate top-line summary (never
+                    // averaged) even when per-account rows exist; the accounts
+                    // are only surfaced via the detail panel's `▸`.
                     aggregateMetrics(snapshot: snapshot)
+                    if provider != .claude, !accounts.isEmpty {
+                        accountsAffordance(count: accounts.count, updatedAt: snapshot.accountsUpdatedAt, provider: provider)
+                    }
                 }
             } else {
                 Text(emptyStateText(for: status, provider: provider))
@@ -151,11 +160,20 @@ struct MenuBarContentView: View {
         }
         averageBar(label: "5h", value: AccountAverages.fiveHour(accounts))
         averageBar(label: "주간", value: AccountAverages.sevenDay(accounts))
+        accountsAffordance(count: accounts.count, updatedAt: snapshot.accountsUpdatedAt, provider: provider)
+    }
+
+    /// "N개 계정 · 갱신 X분 전" caption + chevron affordance that opens the
+    /// detail panel. Shared by the Claude average card and the Codex
+    /// aggregate card (Codex keeps its top-line but still gets this row once
+    /// it has per-account data to show).
+    @ViewBuilder
+    private func accountsAffordance(count: Int, updatedAt: String?, provider: Provider) -> some View {
         HStack {
-            Text("\(accounts.count)개 계정")
+            Text("\(count)개 계정")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            if let updatedCaption = Self.freshnessCaption(snapshot.accountsUpdatedAt, now: .now) {
+            if let updatedCaption = Self.freshnessCaption(updatedAt, now: .now) {
                 Text("· \(updatedCaption)")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)

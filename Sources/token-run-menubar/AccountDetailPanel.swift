@@ -88,6 +88,11 @@ struct AccountDetailPanel: View {
             } else {
                 miniBar(label: "5h", window: account.fiveHour)
                 miniBar(label: "주간", window: account.sevenDay)
+                if let total = account.totalTokens {
+                    Text("누적 \(TokenRate.countLabel(total))")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
                 resetLine(account)
                 freshnessLine(account)
             }

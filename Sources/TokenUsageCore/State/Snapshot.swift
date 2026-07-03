@@ -273,15 +273,23 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
     }
 }
 
-/// Human-readable Korean label for a non-ok claude-swap account status.
-/// Returns nil when status == "ok" (render usage bars instead).
+/// Human-readable Korean label for a non-ok account status (claude-swap or
+/// codex-lb). Returns nil when status == "ok" (render usage bars instead).
 public func accountStatusLabel(_ status: String) -> String? {
     switch status {
     case "ok": return nil
+    // claude-swap statuses
     case "api_key": return "할당량 없음"
     case "token_expired": return "토큰 만료"
     case "keychain_unavailable": return "키체인 잠김"
     case "no_credentials": return "자격증명 없음"
+    // codex-lb statuses (see server-go/internal/codexaccounts/reader.go
+    // normalizeStatus — "active" is remapped to "ok" before this is called;
+    // everything else passes through unchanged from codex-lb).
+    case "paused": return "일시중지"
+    case "deactivated": return "비활성화"
+    case "error": return "오류"
+    case "rate_limited": return "레이트리밋"
     default: return "조회 실패"
     }
 }
