@@ -92,6 +92,51 @@ public struct SnapshotExtras: Codable, Equatable, Sendable {
         extraRateWindows: [])
 }
 
+/// One quota window for a single claude-swap account.
+public struct AccountWindow: Codable, Equatable, Sendable {
+    public let usedPct: Double
+    public let resetsAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case usedPct = "used_pct"
+        case resetsAt = "resets_at"
+    }
+
+    public init(usedPct: Double, resetsAt: String?) {
+        self.usedPct = usedPct
+        self.resetsAt = resetsAt
+    }
+}
+
+/// One claude-swap-managed Claude account's usage (menu-bar per-account rows).
+public struct AccountUsage: Codable, Equatable, Sendable {
+    public let number: Int
+    public let email: String
+    public let active: Bool
+    public let status: String
+    public let fiveHour: AccountWindow?
+    public let sevenDay: AccountWindow?
+
+    enum CodingKeys: String, CodingKey {
+        case number
+        case email
+        case active
+        case status
+        case fiveHour = "five_hour"
+        case sevenDay = "seven_day"
+    }
+
+    public init(number: Int, email: String, active: Bool, status: String,
+                fiveHour: AccountWindow?, sevenDay: AccountWindow?) {
+        self.number = number
+        self.email = email
+        self.active = active
+        self.status = status
+        self.fiveHour = fiveHour
+        self.sevenDay = sevenDay
+    }
+}
+
 /// Captures the fetch status embedded in every snapshot.
 public struct SnapshotStatus: Codable, Equatable, Sendable {
     public let state: ProviderState
@@ -129,6 +174,8 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
     public let credits: Credits?
     public let extras: SnapshotExtras
     public let status: SnapshotStatus
+    public let accounts: [AccountUsage]?
+    public let accountsUpdatedAt: String?
 
     enum CodingKeys: String, CodingKey {
         case schema
@@ -147,6 +194,8 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
         case credits
         case extras
         case status
+        case accounts
+        case accountsUpdatedAt = "accounts_updated_at"
     }
 
     public init(
@@ -165,7 +214,9 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
         quotaWindows: [QuotaWindow],
         credits: Credits?,
         extras: SnapshotExtras,
-        status: SnapshotStatus)
+        status: SnapshotStatus,
+        accounts: [AccountUsage]? = nil,
+        accountsUpdatedAt: String? = nil)
     {
         self.schema = schema
         self.seq = seq
@@ -183,6 +234,8 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
         self.credits = credits
         self.extras = extras
         self.status = status
+        self.accounts = accounts
+        self.accountsUpdatedAt = accountsUpdatedAt
     }
 
     /// Builds a degraded snapshot that preserves the final schema.

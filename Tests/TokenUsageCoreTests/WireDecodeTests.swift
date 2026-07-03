@@ -12,4 +12,47 @@ final class WireDecodeTests: XCTestCase {
         XCTAssertEqual(snap.provider, .claude)
         XCTAssertEqual(snap.seq, 110)
     }
+
+    func testDecodesClaudeAccounts() throws {
+        let json = """
+        {"schema":1,"seq":1,"generated_at_utc":"2026-07-03T09:00:00.000Z",
+         "producer_id":"h","producer_tz":"UTC","provider":"claude",
+         "burn_rate_per_min":0,"burn_state":"idle","today_total_tokens":0,"today_sessions":0,
+         "rolling_5h":{"used_pct":0,"remaining_seconds":0,"resets_at":null},
+         "weekly":{"used_pct":0,"remaining_seconds":0,"resets_at":null},
+         "quota_windows":[],"credits":null,
+         "extras":{"login_method":null,"account_email":null,"rate_limit_tier":null,"extra_rate_windows":[]},
+         "status":{"state":"ok","data_source":"api_only","stale":false},
+         "accounts":[
+           {"number":1,"email":"a@b.com","active":false,"status":"ok",
+            "five_hour":{"used_pct":0.07,"resets_at":"2026-07-03T12:00:00.000Z"},
+            "seven_day":{"used_pct":0.29,"resets_at":null}},
+           {"number":2,"email":"c@d.com","active":true,"status":"api_key",
+            "five_hour":null,"seven_day":null}],
+         "accounts_updated_at":"2026-07-03T08:55:00.000Z"}
+        """
+        let snap = try JSONDecoder().decode(UsageSnapshot.self, from: Data(json.utf8))
+        XCTAssertEqual(snap.accounts?.count, 2)
+        XCTAssertEqual(snap.accounts?[0].email, "a@b.com")
+        XCTAssertEqual(snap.accounts?[0].fiveHour?.usedPct, 0.07)
+        XCTAssertEqual(snap.accounts?[1].status, "api_key")
+        XCTAssertNil(snap.accounts?[1].fiveHour)
+        XCTAssertEqual(snap.accountsUpdatedAt, "2026-07-03T08:55:00.000Z")
+    }
+
+    func testDecodesSnapshotWithoutAccounts() throws {
+        let json = """
+        {"schema":1,"seq":1,"generated_at_utc":"2026-07-03T09:00:00.000Z",
+         "producer_id":"h","producer_tz":"UTC","provider":"claude",
+         "burn_rate_per_min":0,"burn_state":"idle","today_total_tokens":0,"today_sessions":0,
+         "rolling_5h":{"used_pct":0,"remaining_seconds":0,"resets_at":null},
+         "weekly":{"used_pct":0,"remaining_seconds":0,"resets_at":null},
+         "quota_windows":[],"credits":null,
+         "extras":{"login_method":null,"account_email":null,"rate_limit_tier":null,"extra_rate_windows":[]},
+         "status":{"state":"ok","data_source":"api_only","stale":false}}
+        """
+        let snap = try JSONDecoder().decode(UsageSnapshot.self, from: Data(json.utf8))
+        XCTAssertNil(snap.accounts)
+        XCTAssertNil(snap.accountsUpdatedAt)
+    }
 }
