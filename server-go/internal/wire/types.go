@@ -60,6 +60,24 @@ func EmptyRollingWindow() RollingWindow {
 	return RollingWindow{UsedPct: 0, RemainingSeconds: 0, ResetsAt: nil}
 }
 
+// AccountWindow is one quota window for a single claude-swap account.
+type AccountWindow struct {
+	UsedPct  float64 `json:"used_pct"`
+	ResetsAt *string `json:"resets_at"`
+}
+
+// AccountUsage is one claude-swap-managed Claude account's usage, as surfaced
+// under a Claude snapshot's accounts[]. Status mirrors cswap usageStatus:
+// ok | token_expired | api_key | keychain_unavailable | no_credentials | unavailable.
+type AccountUsage struct {
+	Number   int            `json:"number"`
+	Email    string         `json:"email"`
+	Active   bool           `json:"active"`
+	Status   string         `json:"status"`
+	FiveHour *AccountWindow `json:"five_hour"`
+	SevenDay *AccountWindow `json:"seven_day"`
+}
+
 // Credits captures credit balance information when a provider exposes it.
 type Credits struct {
 	Remaining float64 `json:"remaining"`
@@ -109,6 +127,10 @@ type UsageSnapshot struct {
 	Credits           *Credits       `json:"credits"`
 	Extras            SnapshotExtras `json:"extras"`
 	Status            SnapshotStatus `json:"status"`
+	// Accounts is Claude-only, present only when claude-swap is detected.
+	// omitempty keeps codex + no-swap snapshots byte-identical to before.
+	Accounts        []AccountUsage `json:"accounts,omitempty"`
+	AccountsUpdated *string        `json:"accounts_updated_at,omitempty"`
 }
 
 // ProducerInfo is stable producer metadata picked up from env at boot.
