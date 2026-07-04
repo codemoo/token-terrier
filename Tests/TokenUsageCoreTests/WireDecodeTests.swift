@@ -62,12 +62,13 @@ final class WireDecodeTests: XCTestCase {
         XCTAssertEqual(accountStatusLabel("token_expired"), "토큰 만료")
         XCTAssertEqual(accountStatusLabel("keychain_unavailable"), "키체인 잠김")
         XCTAssertEqual(accountStatusLabel("no_credentials"), "자격증명 없음")
-        XCTAssertEqual(accountStatusLabel("unavailable"), "조회 실패")
+        XCTAssertEqual(accountStatusLabel("unavailable"), "상태 없음")
         XCTAssertEqual(accountStatusLabel("something_new"), "조회 실패")
         // codex-lb statuses (normalizeStatus in server-go remaps "active"
         // to "ok" before this is ever called with a codex value).
         XCTAssertEqual(accountStatusLabel("paused"), "일시중지")
         XCTAssertEqual(accountStatusLabel("deactivated"), "비활성화")
+        XCTAssertEqual(accountStatusLabel("reauth_required"), "재인증 필요")
         XCTAssertEqual(accountStatusLabel("error"), "오류")
         XCTAssertEqual(accountStatusLabel("rate_limited"), "레이트리밋")
     }

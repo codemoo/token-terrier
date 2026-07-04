@@ -105,3 +105,24 @@ func TestReader_MalformedRewriteKeepsLastGood(t *testing.T) {
 		t.Fatalf("malformed rewrite should keep last-good updated_at, got %v want %v", updated2, updated)
 	}
 }
+
+func TestNormalizeStatusAliases(t *testing.T) {
+	cases := map[string]string{
+		" active ":        "ok",
+		"enabled":         "ok",
+		"logged-in":       "ok",
+		"disabled":        "paused",
+		"inactive":        "paused",
+		"auth required":   "reauth_required",
+		"reauthrequired":  "reauth_required",
+		"token-expired":   "reauth_required",
+		"rateLimited":     "rate_limited",
+		"":                "unavailable",
+		"reauth_required": "reauth_required",
+	}
+	for input, want := range cases {
+		if got := normalizeStatus(input); got != want {
+			t.Fatalf("normalizeStatus(%q) = %q, want %q", input, got, want)
+		}
+	}
+}

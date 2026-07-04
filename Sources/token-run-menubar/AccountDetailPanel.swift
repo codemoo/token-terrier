@@ -60,6 +60,8 @@ struct AccountDetailPanel: View {
     @ViewBuilder
     private func accountRow(_ account: AccountUsage) -> some View {
         VStack(alignment: .leading, spacing: 4) {
+            let statusLabel = accountStatusLabel(account.status)
+            let hasUsageData = account.fiveHour != nil || account.sevenDay != nil || account.totalTokens != nil || account.lastRefreshAt != nil
             HStack(spacing: 4) {
                 Image(systemName: account.active ? "largecircle.fill.circle" : "circle")
                     .font(.caption2)
@@ -81,11 +83,12 @@ struct AccountDetailPanel: View {
                         .accessibilityLabel("시간당 토큰 \(rate)")
                 }
             }
-            if let label = accountStatusLabel(account.status) {
+            if let label = statusLabel {
                 Text(label)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-            } else {
+            }
+            if statusLabel == nil || hasUsageData {
                 miniBar(label: "5h", window: account.fiveHour)
                 miniBar(label: "주간", window: account.sevenDay)
                 if let total = account.totalTokens {

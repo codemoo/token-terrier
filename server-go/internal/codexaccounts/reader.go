@@ -88,21 +88,36 @@ func toWindow(pct *float64, resetsAt *string) *wire.AccountWindow {
 }
 
 // normalizeStatus maps codex-lb account status to the same vocabulary used
-// by claude-swap accounts ("ok" for a healthy/active account). Unknown
-// statuses pass through unchanged.
+// by claude-swap accounts ("ok" for a healthy/active account). Known
+// codex-lb aliases are folded so older refresher outputs and newer
+// dashboard shapes render consistently.
 func normalizeStatus(status string) string {
-	trimmed := strings.TrimSpace(status)
-	if strings.EqualFold(trimmed, "active") {
+	trimmed := normalizeStatusToken(status)
+	switch trimmed {
+	case "active", "enabled", "healthy", "logged_in", "ok":
 		return "ok"
-	}
-	if trimmed == "" {
+	case "disabled", "inactive", "suspended":
+		return "paused"
+	case "auth_required", "auth_expired", "login_required", "reauth", "reauthrequired", "token_expired", "unauthorized":
+		return "reauth_required"
+	case "ratelimited":
+		return "rate_limited"
+	case "":
 		return "unavailable"
+	default:
+		return trimmed
 	}
+}
+
+func normalizeStatusToken(status string) string {
+	trimmed := strings.ToLower(strings.TrimSpace(status))
+	trimmed = strings.ReplaceAll(trimmed, "-", "_")
+	trimmed = strings.ReplaceAll(trimmed, " ", "_")
 	return trimmed
 }
 
 func isActiveStatus(status string) bool {
-	return strings.EqualFold(strings.TrimSpace(status), "active")
+	return normalizeStatus(status) == "ok"
 }
 
 func normalizeTimestamp(raw *string) *string {

@@ -30,6 +30,56 @@ def _dict_or_empty(value):
     return value if isinstance(value, dict) else {}
 
 
+def _normalize_status_value(value):
+    text = _as_identifier(value)
+    if text is None:
+        return None
+    normalized = text.lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "ok": "active",
+        "healthy": "active",
+        "enabled": "active",
+        "logged_in": "active",
+        "disabled": "paused",
+        "inactive": "paused",
+        "suspended": "paused",
+        "auth_required": "reauth_required",
+        "auth_expired": "reauth_required",
+        "login_required": "reauth_required",
+        "reauth": "reauth_required",
+        "reauthrequired": "reauth_required",
+        "token_expired": "reauth_required",
+        "unauthorized": "reauth_required",
+        "rate_limited": "rate_limited",
+        "ratelimited": "rate_limited",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _derive_status(acct):
+    """Return a normalized codex-lb account status from several known shapes."""
+    for key in ("status", "accountStatus", "state", "authStatus", "health"):
+        status = _normalize_status_value(acct.get(key))
+        if status is not None:
+            return status
+
+    auth = _dict_or_empty(acct.get("auth"))
+    for key in ("status", "state", "authStatus"):
+        status = _normalize_status_value(auth.get(key))
+        if status is not None:
+            return status
+    for key in ("requiresReauth", "reauthRequired", "expired", "isExpired"):
+        if auth.get(key) is True:
+            return "reauth_required"
+
+    if _as_identifier(acct.get("deactivationReason")) is not None:
+        return "deactivated"
+    for key in ("active", "isActive", "enabled", "isEnabled"):
+        if isinstance(acct.get(key), bool):
+            return "active" if acct.get(key) else "paused"
+    return "unavailable"
+
+
 def to_used_pct(remaining_percent):
     """Convert a codex-lb "remaining percent" (0-100) into a used fraction (0.0-1.0).
 
@@ -110,7 +160,7 @@ def build_derived(accounts_json, prev_samples, now_ts):
                 "email": acct.get("email"),
                 "alias": acct.get("alias"),
                 "displayName": acct.get("displayName"),
-                "status": acct.get("status"),
+                "status": _derive_status(acct),
                 "fiveHourPct": round(five_hour_pct, 6) if five_hour_pct is not None else None,
                 "sevenDayPct": round(seven_day_pct, 6) if seven_day_pct is not None else None,
                 "resetAtPrimary": acct.get("resetAtPrimary"),
@@ -121,12 +171,6 @@ def build_derived(accounts_json, prev_samples, now_ts):
             }
         )
 
-    derived_accounts.sort(
-        key=lambda a: (
-            a["accountId"] is None,
-            str(a["accountId"] or a.get("alias") or a.get("displayName") or a.get("email") or ""),
-        )
-    )
     for i, a in enumerate(derived_accounts):
         a["number"] = i + 1
 

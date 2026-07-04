@@ -288,8 +288,10 @@ public func accountStatusLabel(_ status: String) -> String? {
     // everything else passes through unchanged from codex-lb).
     case "paused": return "일시중지"
     case "deactivated": return "비활성화"
+    case "reauth_required": return "재인증 필요"
     case "error": return "오류"
     case "rate_limited": return "레이트리밋"
+    case "unavailable": return "상태 없음"
     default: return "조회 실패"
     }
 }
