@@ -47,6 +47,7 @@ bar.
   server.
 - One compact menu bar view for Claude Code and ChatGPT Codex.
 - Live HTTP/SSE updates with local direct-read fallback for single-Mac setups.
+- Per-account panels for claude-swap and codex-lb account pools.
 - Small public surface: a SwiftUI menu bar app and a standalone Go server.
 - A running Bedlington Terrier whose pace follows token burn.
 
@@ -56,8 +57,16 @@ bar.
 - Separates collection from viewing, so remote token activity can be monitored
   from another Mac.
 - Streams updates over provider-scoped SSE endpoints.
-- Reads Claude/Codex OAuth credentials, JSONL session logs, optional Hermes
-  SQLite data, and optional codex-lb API aggregate usage.
+- Shows burn rate, 5-hour quota, weekly quota, reset time, and remaining time.
+- For Claude account pools, the outer 5-hour and weekly bars show the average
+  usage across healthy claude-swap accounts; the reset line uses the earliest
+  reset among those accounts.
+- Shows account detail panels with status, active marker, 5-hour/weekly bars,
+  per-window reset times, token rate, and totals when available.
+- Reads Claude/Codex OAuth credentials, JSONL session logs, optional Claude
+  claude-swap session backups, optional Hermes SQLite data, optional
+  claude-swap account snapshots, optional codex-lb aggregate usage, and optional
+  codex-lb per-account snapshots.
 - Uses bundled Bedlington Terrier assets for the app icon and menu bar animation.
 - Supports Sparkle app updates through GitHub Releases.
 
@@ -131,9 +140,12 @@ Claude credentials: ~/.claude/.credentials.json
 Codex credentials:  ~/.codex/auth.json
 Claude JSONL:       ~/.claude/projects/**/*.jsonl
 Claude-swap JSONL:  ~/.claude-swap-backup/sessions/*/projects/**/*.jsonl
+Claude-swap accounts:
+                    ~/.config/token-usage/claude-swap-accounts.json
 Codex JSONL:        ~/.codex/sessions/**/*.jsonl
 Hermes SQLite:      ~/.hermes/state.db
 codex-lb API:       http://127.0.0.1:2455/v1/usage
+codex-lb accounts:  ~/.config/token-usage/codex-lb-accounts.json
 ```
 
 Useful environment variables:
@@ -145,16 +157,60 @@ TOKEN_USAGE_CLAUDE_CRED=/path/to/.claude/.credentials.json
 TOKEN_USAGE_CODEX_CRED=/path/to/.codex/auth.json
 TOKEN_USAGE_CLAUDE_PROJECTS=/path/to/.claude/projects
 TOKEN_USAGE_CLAUDE_SWAP_SESSIONS_ROOT=/path/to/.claude-swap-backup/sessions
+TOKEN_USAGE_CLAUDE_SWAP_ACCOUNTS=/path/to/claude-swap-accounts.json
 TOKEN_USAGE_CODEX_SESSIONS=/path/to/.codex/sessions
+TOKEN_USAGE_CODEX_ACCOUNTS=/path/to/codex-lb-accounts.json
 TOKEN_USAGE_HERMES_DB=/path/to/.hermes/state.db
 CODEX_LB_API_KEY=<codex-lb-api-key>
 TOKEN_USAGE_CODEX_LB_URL=http://127.0.0.1:2455
 TOKEN_USAGE_CODEX_LB_API_KEY=<codex-lb-api-key>
 TOKEN_USAGE_DISABLE_JSONL=1
 TOKEN_USAGE_DISABLE_CLAUDE_SWAP_SESSIONS=1
+TOKEN_USAGE_DISABLE_CLAUDE_SWAP=1
+TOKEN_USAGE_DISABLE_CODEX_ACCOUNTS=1
 TOKEN_USAGE_DISABLE_HERMES=1
 TOKEN_USAGE_DISABLE_CODEX_LB=1
 ```
+
+## Account Integrations
+
+Token Terrier never shells out to claude-swap or logs into codex-lb from the Go
+daemon. Instead, small optional refresher jobs write local snapshot files that
+the daemon reads on its normal refresh path.
+
+For claude-swap account rows:
+
+```sh
+./scripts/install-claude-swap-refresh.sh
+```
+
+The LaunchAgent runs every 5 minutes by default and writes:
+
+```text
+~/.config/token-usage/claude-swap-accounts.json
+```
+
+The daemon also reads claude-swap session backups from
+`~/.claude-swap-backup/sessions` when present, so non-active Claude accounts can
+show recent token activity instead of only the selected account's live burn.
+
+For codex-lb account rows:
+
+```sh
+./scripts/install-codex-lb-accounts-refresh.sh
+```
+
+Then put the codex-lb dashboard password in the generated 0600 env file:
+
+```text
+~/.config/token-usage/codex-lb-refresh.env
+CODEX_LB_DASHBOARD_PASSWORD=<dashboard-password>
+```
+
+The refresher writes `~/.config/token-usage/codex-lb-accounts.json` and keeps a
+small local sample sidecar for token-rate deltas. The menu bar keeps Codex's
+outer card as aggregate usage, while the account panel shows the codex-lb
+account list, statuses, usage windows, reset times, token rates, and totals.
 
 ## HTTP API
 
@@ -169,6 +225,10 @@ GET /codex/sse
 
 `/claude/*` and `/codex/*` require provider-specific bearer tokens from
 `~/.config/token-usage/tokens.json`, generated on first server run.
+
+Snapshot and SSE payloads may include an `accounts` array and
+`accounts_updated_at` when a claude-swap or codex-lb account snapshot is
+available.
 
 ## Local And Remote Modes
 
