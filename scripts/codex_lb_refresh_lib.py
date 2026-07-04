@@ -10,6 +10,8 @@ or connectivity.
 import datetime
 import math
 
+DEFAULT_CODEX_LB_URL = "http://127.0.0.1:2455"
+
 
 def _as_number(value):
     if isinstance(value, bool):
@@ -28,6 +30,16 @@ def _as_identifier(value):
 
 def _dict_or_empty(value):
     return value if isinstance(value, dict) else {}
+
+
+def select_base_url(env):
+    """Pick the codex-lb base URL using the same env aliases as the Go daemon."""
+    env = env or {}
+    for key in ("TOKEN_USAGE_CODEX_LB_URL", "CODEX_LB_URL", "CODEX_LB_BASE_URL"):
+        value = _as_identifier(env.get(key))
+        if value is not None:
+            return value
+    return DEFAULT_CODEX_LB_URL
 
 
 def _normalize_status_value(value):
@@ -126,7 +138,7 @@ def build_derived(accounts_json, prev_samples, now_ts):
     """Map a codex-lb /api/accounts body into the derived shape + updated samples.
 
     Returns (derived_dict, new_samples):
-      - derived_dict: {"schemaVersion": 1, "accounts": [...]} sorted stably by accountId.
+      - derived_dict: {"schemaVersion": 1, "accounts": [...]} in codex-lb source order.
       - new_samples: {accountId: {"totalTokens": int, "ts": now_ts}} for the next delta.
     """
     prev_samples = prev_samples or {}

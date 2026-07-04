@@ -20,9 +20,9 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from codex_lb_refresh_lib import build_derived, validate_accounts_payload  # noqa: E402
+from codex_lb_refresh_lib import build_derived, select_base_url, validate_accounts_payload  # noqa: E402
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s codex-lb-refresh: %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s codex-lb-refresh: %(message)s", stream=sys.stdout)
 log = logging.getLogger("codex-lb-refresh")
 
 CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".config", "token-usage")
@@ -147,7 +147,7 @@ def main():
         log.info("CODEX_LB_DASHBOARD_PASSWORD not set; refresher dormant")
         return 0
 
-    base_url = (os.environ.get("CODEX_LB_URL", "").strip() or "http://127.0.0.1:2455")
+    base_url = select_base_url(os.environ)
     out_path = os.environ.get("TOKEN_USAGE_CODEX_ACCOUNTS", "").strip() or DEFAULT_OUT
     sidecar_path = DEFAULT_SIDECAR
     lock_dir = out_path + ".lock"

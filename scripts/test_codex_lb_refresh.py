@@ -6,6 +6,7 @@ import unittest
 
 from codex_lb_refresh_lib import (
     build_derived,
+    select_base_url,
     to_used_pct,
     tokens_per_hour,
     validate_accounts_payload,
@@ -42,6 +43,23 @@ class ValidateAccountsPayloadTests(unittest.TestCase):
     def test_validate_rejects_401_body(self):
         self.assertFalse(validate_accounts_payload({"detail": "unauthorized"}))
         self.assertTrue(validate_accounts_payload({"accounts": []}))
+
+
+class SelectBaseURLTests(unittest.TestCase):
+    def test_select_base_url_uses_daemon_env_aliases(self):
+        self.assertEqual(select_base_url({}), "http://127.0.0.1:2455")
+        self.assertEqual(select_base_url({"CODEX_LB_BASE_URL": "http://base"}), "http://base")
+        self.assertEqual(
+            select_base_url({"CODEX_LB_URL": "http://legacy", "CODEX_LB_BASE_URL": "http://base"}),
+            "http://legacy",
+        )
+        self.assertEqual(
+            select_base_url({
+                "TOKEN_USAGE_CODEX_LB_URL": "http://token-usage",
+                "CODEX_LB_URL": "http://legacy",
+            }),
+            "http://token-usage",
+        )
 
 
 class BuildDerivedTests(unittest.TestCase):

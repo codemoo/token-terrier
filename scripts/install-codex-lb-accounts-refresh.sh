@@ -34,7 +34,7 @@ if [ ! -f "$ENV_FILE" ]; then
 # Put the codex-lb dashboard password on the next line (no quotes):
 CODEX_LB_DASHBOARD_PASSWORD=
 # Optional overrides:
-# CODEX_LB_URL=http://127.0.0.1:2455
+# TOKEN_USAGE_CODEX_LB_URL=http://127.0.0.1:2455
 ENVEOF
 	chmod 600 "$ENV_FILE"
 	echo "created ${ENV_FILE} (0600) — set CODEX_LB_DASHBOARD_PASSWORD in it, then re-run or kickstart."
