@@ -8,13 +8,34 @@ or connectivity.
 """
 
 import datetime
+import math
+
+
+def _as_number(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)) and math.isfinite(value):
+        return value
+    return None
+
+
+def _as_identifier(value):
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _dict_or_empty(value):
+    return value if isinstance(value, dict) else {}
 
 
 def to_used_pct(remaining_percent):
     """Convert a codex-lb "remaining percent" (0-100) into a used fraction (0.0-1.0).
 
-    Returns None when remaining_percent is None (unknown/absent).
+    Returns None when remaining_percent is None/non-numeric (unknown/absent).
     """
+    remaining_percent = _as_number(remaining_percent)
     if remaining_percent is None:
         return None
     return max(0.0, min(1.0, 1.0 - remaining_percent / 100.0))
@@ -27,12 +48,18 @@ def tokens_per_hour(prev, now):
     Returns None for: no prior sample, non-positive elapsed time, or a
     negative token delta (counter reset).
     """
-    if prev is None or now is None:
+    if not isinstance(prev, dict) or not isinstance(now, dict):
         return None
-    delta_t = now["ts"] - prev["ts"]
+    prev_total = _as_number(prev.get("totalTokens"))
+    now_total = _as_number(now.get("totalTokens"))
+    prev_ts = _as_number(prev.get("ts"))
+    now_ts = _as_number(now.get("ts"))
+    if None in (prev_total, now_total, prev_ts, now_ts):
+        return None
+    delta_t = now_ts - prev_ts
     if delta_t <= 0:
         return None
-    delta_tok = now["totalTokens"] - prev["totalTokens"]
+    delta_tok = now_total - prev_total
     if delta_tok < 0:
         return None
     return delta_tok / (delta_t / 3600.0)
@@ -59,17 +86,20 @@ def build_derived(accounts_json, prev_samples, now_ts):
     derived_accounts = []
 
     for acct in accounts_in:
-        account_id = acct.get("accountId")
-        usage = acct.get("usage") or {}
-        request_usage = acct.get("requestUsage") or {}
-        total_tokens = request_usage.get("totalTokens")
+        if not isinstance(acct, dict):
+            continue
+        account_id = _as_identifier(acct.get("accountId"))
+        usage = _dict_or_empty(acct.get("usage"))
+        request_usage = _dict_or_empty(acct.get("requestUsage"))
+        total_tokens_value = _as_number(request_usage.get("totalTokens"))
+        total_tokens = int(total_tokens_value) if total_tokens_value is not None else None
 
         now_sample = None
-        if total_tokens is not None:
+        if account_id is not None and total_tokens is not None:
             now_sample = {"totalTokens": total_tokens, "ts": now_ts}
             new_samples[account_id] = now_sample
 
-        rate = tokens_per_hour(prev_samples.get(account_id), now_sample)
+        rate = tokens_per_hour(prev_samples.get(account_id), now_sample) if account_id is not None else None
 
         five_hour_pct = to_used_pct(usage.get("primaryRemainingPercent"))
         seven_day_pct = to_used_pct(usage.get("secondaryRemainingPercent"))
@@ -91,7 +121,12 @@ def build_derived(accounts_json, prev_samples, now_ts):
             }
         )
 
-    derived_accounts.sort(key=lambda a: (a["accountId"] is None, a["accountId"]))
+    derived_accounts.sort(
+        key=lambda a: (
+            a["accountId"] is None,
+            str(a["accountId"] or a.get("alias") or a.get("displayName") or a.get("email") or ""),
+        )
+    )
     for i, a in enumerate(derived_accounts):
         a["number"] = i + 1
 

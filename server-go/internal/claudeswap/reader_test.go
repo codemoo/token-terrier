@@ -167,6 +167,33 @@ func TestReaderFileDeletedAfterGoodReadClears(t *testing.T) {
 	}
 }
 
+func TestReaderMalformedRewriteKeepsLastGood(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "accounts.json")
+	if err := os.WriteFile(path, []byte(sampleTwoAccounts), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := NewReader(path, nil)
+	r.checkEvery = 0 // disable throttle for the test
+	accts, updated := r.Accounts()
+	if len(accts) != 2 || updated == nil {
+		t.Fatalf("first read = (%+v,%v), want 2 accounts + updated", accts, updated)
+	}
+
+	future := time.Now().Add(2 * time.Second)
+	if err := os.WriteFile(path, []byte(`not json`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chtimes(path, future, future)
+	accts, updated2 := r.Accounts()
+	if len(accts) != 2 {
+		t.Fatalf("malformed rewrite should keep last-good accounts, got %+v", accts)
+	}
+	if updated2 == nil || *updated2 != *updated {
+		t.Fatalf("malformed rewrite should keep last-good updated_at, got %v want %v", updated2, updated)
+	}
+}
+
 func TestReaderWrongSchemaReturnsNil(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "accounts.json")

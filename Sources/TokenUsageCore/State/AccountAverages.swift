@@ -14,6 +14,7 @@ public enum AccountAverages {
         let values = accounts
             .filter { $0.status == "ok" }
             .compactMap { $0[keyPath: keyPath]?.usedPct }
+            .map { min(max($0, 0), 1) }
         guard !values.isEmpty else { return nil }
         return values.reduce(0, +) / Double(values.count)
     }

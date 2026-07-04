@@ -17,6 +17,7 @@ class ToUsedPctTests(unittest.TestCase):
         self.assertEqual(to_used_pct(100), 0.0)
         self.assertEqual(to_used_pct(0), 1.0)
         self.assertIsNone(to_used_pct(None))
+        self.assertIsNone(to_used_pct("90"))
 
 
 class TokensPerHourTests(unittest.TestCase):
@@ -31,6 +32,9 @@ class TokensPerHourTests(unittest.TestCase):
         self.assertEqual(
             tokens_per_hour({"totalTokens": 100, "ts": 0}, {"totalTokens": 700, "ts": 3600}),
             600.0,
+        )
+        self.assertIsNone(
+            tokens_per_hour({"totalTokens": "bad", "ts": 0}, {"totalTokens": 700, "ts": 3600})
         )
 
 
@@ -79,6 +83,25 @@ class BuildDerivedTests(unittest.TestCase):
         self.assertEqual(new["a"]["totalTokens"], 700)
         # 상위 accountsUpdatedAt = now_ts(3600s epoch) ISO8601 UTC
         self.assertEqual(d["accountsUpdatedAt"], "1970-01-01T01:00:00Z")
+
+    def test_build_derived_skips_bad_items_and_does_not_sample_missing_account_id(self):
+        body = {
+            "accounts": [
+                "not-an-account",
+                {
+                    "email": "fallback@x",
+                    "status": "active",
+                    "usage": {"primaryRemainingPercent": "bad"},
+                    "requestUsage": {"totalTokens": 100},
+                },
+            ]
+        }
+        d, new = build_derived(body, {"fallback@x": {"totalTokens": 10, "ts": 0}}, now_ts=3600)
+        self.assertEqual(len(d["accounts"]), 1)
+        self.assertIsNone(d["accounts"][0]["accountId"])
+        self.assertIsNone(d["accounts"][0]["fiveHourPct"])
+        self.assertIsNone(d["accounts"][0]["tokensPerHour"])
+        self.assertEqual(new, {})
 
 
 if __name__ == "__main__":

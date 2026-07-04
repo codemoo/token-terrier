@@ -11,6 +11,8 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -59,13 +61,13 @@ func parseAccounts(data []byte) ([]wire.AccountUsage, string, error) {
 		acc := wire.AccountUsage{
 			Number:        a.Number,
 			Email:         firstNonEmpty(a.Alias, a.DisplayName, a.Email),
-			Active:        a.Status == "active",
+			Active:        isActiveStatus(a.Status),
 			Status:        normalizeStatus(a.Status),
 			FiveHour:      toWindow(a.FiveHourPct, a.ResetAtPrimary),
 			SevenDay:      toWindow(a.SevenDayPct, a.ResetAtSecondary),
 			TokensPerHour: a.TokensPerHour,
 			TotalTokens:   a.TotalTokens,
-			LastRefreshAt: a.LastRefreshAt,
+			LastRefreshAt: normalizeTimestamp(a.LastRefreshAt),
 		}
 		out = append(out, acc)
 	}
@@ -80,8 +82,8 @@ func toWindow(pct *float64, resetsAt *string) *wire.AccountWindow {
 		return nil
 	}
 	return &wire.AccountWindow{
-		UsedPct:  *pct,
-		ResetsAt: resetsAt,
+		UsedPct:  clampUnit(*pct),
+		ResetsAt: normalizeTimestamp(resetsAt),
 	}
 }
 
@@ -89,16 +91,59 @@ func toWindow(pct *float64, resetsAt *string) *wire.AccountWindow {
 // by claude-swap accounts ("ok" for a healthy/active account). Unknown
 // statuses pass through unchanged.
 func normalizeStatus(status string) string {
-	if status == "active" {
+	trimmed := strings.TrimSpace(status)
+	if strings.EqualFold(trimmed, "active") {
 		return "ok"
 	}
-	return status
+	if trimmed == "" {
+		return "unavailable"
+	}
+	return trimmed
+}
+
+func isActiveStatus(status string) bool {
+	return strings.EqualFold(strings.TrimSpace(status), "active")
+}
+
+func normalizeTimestamp(raw *string) *string {
+	if raw == nil {
+		return nil
+	}
+	s := strings.TrimSpace(*raw)
+	if s == "" {
+		return nil
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		if t, err := time.Parse(layout, s); err == nil {
+			out := wire.FormatTime(t.UTC())
+			return &out
+		}
+	}
+	if seconds, err := strconv.ParseInt(s, 10, 64); err == nil && seconds > 0 {
+		out := wire.FormatTime(time.Unix(seconds, 0).UTC())
+		return &out
+	}
+	return nil
+}
+
+func normalizeTimestampString(raw string) *string {
+	return normalizeTimestamp(&raw)
+}
+
+func clampUnit(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
 }
 
 func firstNonEmpty(values ...string) string {
 	for _, v := range values {
-		if v != "" {
-			return v
+		if trimmed := strings.TrimSpace(v); trimmed != "" {
+			return trimmed
 		}
 	}
 	return ""
@@ -167,14 +212,15 @@ func (r *Reader) Accounts() ([]wire.AccountUsage, *string) {
 	r.lastMod = info.ModTime()
 	if perr != nil {
 		r.logger.Debug("codex-lb accounts parse failed", "err", perr)
-		r.cachedAccts, r.cachedUpdated = nil, nil
-		return nil, nil
+		return r.cachedAccts, r.cachedUpdated
 	}
 	r.cachedAccts = accts
 	if accts == nil {
 		r.cachedUpdated = nil
+	} else if u := normalizeTimestampString(updatedAt); u != nil {
+		r.cachedUpdated = u
 	} else {
-		u := updatedAt
+		u := wire.FormatTime(info.ModTime().UTC())
 		r.cachedUpdated = &u
 	}
 	r.logger.Debug("codex-lb accounts loaded", "count", len(accts))

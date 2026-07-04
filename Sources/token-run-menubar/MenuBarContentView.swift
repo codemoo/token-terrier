@@ -146,11 +146,12 @@ struct MenuBarContentView: View {
             if let snapshot = status.snapshot {
                 let accounts = snapshot.accounts ?? []
                 if provider == .claude, !accounts.isEmpty {
-                    // Claude master card = per-account averages + affordance to
-                    // expand the detail panel. A degraded state (auth/network)
-                    // becomes a small inline note instead of hiding the whole
-                    // card, because claude-swap still ships per-account rows in
-                    // that case.
+                    // Keep Claude's aggregate top-line visible at the root depth,
+                    // then add the per-account average affordance below it.
+                    if degradedMessage(for: snapshot.status.state, provider: provider) == nil {
+                        aggregateMetrics(snapshot: snapshot)
+                        Divider().padding(.vertical, 2)
+                    }
                     accountsSummary(snapshot: snapshot, accounts: accounts, provider: provider)
                 } else if let degraded = degradedMessage(for: snapshot.status.state, provider: provider) {
                     Text(degraded)
@@ -162,7 +163,7 @@ struct MenuBarContentView: View {
                     // are only surfaced via the detail panel's `▸`.
                     aggregateMetrics(snapshot: snapshot)
                     if provider != .claude, !accounts.isEmpty {
-                        accountsAffordance(count: accounts.count, updatedAt: snapshot.accountsUpdatedAt, provider: provider)
+                        accountsAffordance(count: accounts.count, updatedAt: snapshot.accountsUpdatedAt)
                     }
                 }
             } else {
@@ -184,8 +185,8 @@ struct MenuBarContentView: View {
         }
     }
 
-    /// The original aggregate top-line (burn + 5h/weekly + credits). Still used
-    /// by Codex and by Claude when no per-account rows are available.
+    /// The aggregate top-line (burn + 5h/weekly + credits). Used by Codex and
+    /// by Claude's root card even when per-account rows are available.
     @ViewBuilder
     private func aggregateMetrics(snapshot: UsageSnapshot) -> some View {
         metricsRow(snapshot: snapshot)
@@ -212,9 +213,12 @@ struct MenuBarContentView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
+        Text("계정 평균")
+            .font(.caption2.bold())
+            .foregroundStyle(.secondary)
         averageBar(label: "5h", value: AccountAverages.fiveHour(accounts))
         averageBar(label: "주간", value: AccountAverages.sevenDay(accounts))
-        accountsAffordance(count: accounts.count, updatedAt: snapshot.accountsUpdatedAt, provider: provider)
+        accountsAffordance(count: accounts.count, updatedAt: snapshot.accountsUpdatedAt)
     }
 
     /// "N개 계정 · 갱신 X분 전" caption + chevron affordance that opens the
@@ -222,20 +226,22 @@ struct MenuBarContentView: View {
     /// aggregate card (Codex keeps its top-line but still gets this row once
     /// it has per-account data to show).
     @ViewBuilder
-    private func accountsAffordance(count: Int, updatedAt: String?, provider: Provider) -> some View {
-        HStack {
-            Text("\(count)개 계정")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            if let updatedCaption = Self.freshnessCaption(updatedAt, now: .now) {
-                Text("· \(updatedCaption)")
+    private func accountsAffordance(count: Int, updatedAt: String?) -> some View {
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            HStack {
+                Text("\(count)개 계정")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
+                if let updatedCaption = Self.freshnessCaption(updatedAt, now: context.date) {
+                    Text("· \(updatedCaption)")
+                        .font(.caption2)
+                        .foregroundStyle(Self.accountFreshnessIsStale(updatedAt, now: context.date) ? Color.orange : Color.secondary.opacity(0.65))
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption2.bold())
+                    .foregroundStyle(.secondary)
             }
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption2.bold())
-                .foregroundStyle(.secondary)
         }
     }
 
@@ -245,6 +251,11 @@ struct MenuBarContentView: View {
     static func freshnessCaption(_ isoString: String?, now: Date) -> String? {
         guard let isoString, let date = SnapshotDateFormatter.date(from: isoString) else { return nil }
         return "갱신 \(relativePast(date, now: now))"
+    }
+
+    static func accountFreshnessIsStale(_ isoString: String?, now: Date) -> Bool {
+        guard let isoString, let date = SnapshotDateFormatter.date(from: isoString) else { return false }
+        return now.timeIntervalSince(date) > 10 * 60
     }
 
     /// "방금" / "N분 전" / "N시간 전" / "N일 전" relative-past label.

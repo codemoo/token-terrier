@@ -26,4 +26,12 @@ final class AccountAveragesTests: XCTestCase {
         XCTAssertNil(AccountAverages.fiveHour([mkAccount(status: "token_expired", five: 0.5, seven: 0.5)]))
         XCTAssertNil(AccountAverages.fiveHour([]))
     }
+
+    func test_average_clampsOutOfRangeWindowValues() {
+        let accts = [
+            mkAccount(status: "ok", five: -1.0, seven: nil),
+            mkAccount(status: "ok", five: 1.5, seven: nil),
+        ]
+        XCTAssertEqual(AccountAverages.fiveHour(accts)!, 0.5, accuracy: 1e-9)
+    }
 }

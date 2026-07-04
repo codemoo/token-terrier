@@ -174,8 +174,7 @@ func (r *Reader) Accounts() ([]wire.AccountUsage, *string) {
 	r.lastMod = info.ModTime()
 	if perr != nil {
 		r.logger.Debug("claude-swap accounts parse failed", "err", perr)
-		r.cachedAccts, r.cachedUpdated = nil, nil
-		return nil, nil
+		return r.cachedAccts, r.cachedUpdated
 	}
 	r.cachedAccts = accts
 	if accts == nil {

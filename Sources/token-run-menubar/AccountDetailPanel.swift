@@ -64,7 +64,7 @@ struct AccountDetailPanel: View {
                 Image(systemName: account.active ? "largecircle.fill.circle" : "circle")
                     .font(.caption2)
                     .foregroundStyle(account.active ? Color.accentColor : .secondary)
-                Text(account.email)
+                Text(displayLabel(for: account))
                     .font(.caption.bold())
                     .foregroundStyle(account.active ? .primary : .secondary)
                     .lineLimit(1)
@@ -109,10 +109,15 @@ struct AccountDetailPanel: View {
             TimelineView(.periodic(from: .now, by: 30)) { context in
                 Text("데이터 갱신: \(MenuBarContentView.relativePast(date, now: context.date))")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(MenuBarContentView.accountFreshnessIsStale(isoString, now: context.date) ? Color.orange : Color.secondary.opacity(0.65))
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
+    }
+
+    private func displayLabel(for account: AccountUsage) -> String {
+        let trimmed = account.email.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "계정 \(account.number)" : trimmed
     }
 
     /// Active account shows the live aggregate burn; others show their own
@@ -134,13 +139,25 @@ struct AccountDetailPanel: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .frame(width: 26, alignment: .leading)
-            ProgressView(value: window?.usedPct ?? 0)
-                .progressViewStyle(.linear)
-            Text("\(Int((window?.usedPct ?? 0) * 100))%")
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 32, alignment: .trailing)
+            if let window {
+                let usedPct = Self.clampUnit(window.usedPct)
+                ProgressView(value: usedPct)
+                    .progressViewStyle(.linear)
+                Text("\(Int(usedPct * 100))%")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 32, alignment: .trailing)
+            } else {
+                Text("데이터 없음")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
+    }
+
+    private static func clampUnit(_ value: Double) -> Double {
+        min(max(value, 0), 1)
     }
 
     /// Reuses the shell's reset formatting so the "남음" countdown stays in sync
