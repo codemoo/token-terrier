@@ -146,13 +146,17 @@ struct MenuBarContentView: View {
             if let snapshot = status.snapshot {
                 let accounts = snapshot.accounts ?? []
                 if provider == .claude, !accounts.isEmpty {
-                    // Keep Claude's aggregate top-line visible at the root depth,
-                    // then add the per-account average affordance below it.
                     if degradedMessage(for: snapshot.status.state, provider: provider) == nil {
-                        aggregateMetrics(snapshot: snapshot)
-                        Divider().padding(.vertical, 2)
+                        aggregateMetrics(
+                            snapshot: snapshot,
+                            accountAverages: AccountAverageValues(accounts: accounts))
                     }
-                    accountsSummary(snapshot: snapshot, accounts: accounts, provider: provider)
+                    if let degraded = degradedMessage(for: snapshot.status.state, provider: provider) {
+                        Text(degraded)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    accountsAffordance(count: accounts.count, updatedAt: snapshot.accountsUpdatedAt)
                 } else if let degraded = degradedMessage(for: snapshot.status.state, provider: provider) {
                     Text(degraded)
                         .font(.caption)
@@ -185,13 +189,13 @@ struct MenuBarContentView: View {
         }
     }
 
-    /// The aggregate top-line (burn + 5h/weekly + credits). Used by Codex and
-    /// by Claude's root card even when per-account rows are available.
+    /// The aggregate top-line (burn + 5h/weekly + credits). Claude can annotate
+    /// its quota rows with account-pool averages without adding a separate block.
     @ViewBuilder
-    private func aggregateMetrics(snapshot: UsageSnapshot) -> some View {
+    private func aggregateMetrics(snapshot: UsageSnapshot, accountAverages: AccountAverageValues? = nil) -> some View {
         metricsRow(snapshot: snapshot)
-        quotaRow(label: "5h", window: snapshot.rolling5h)
-        quotaRow(label: "주간", window: snapshot.weekly)
+        quotaRow(label: "5h", window: snapshot.rolling5h, accountAverage: accountAverages?.fiveHour)
+        quotaRow(label: "주간", window: snapshot.weekly, accountAverage: accountAverages?.sevenDay)
         if let credits = snapshot.credits {
             HStack {
                 Text("Credits")
@@ -204,27 +208,9 @@ struct MenuBarContentView: View {
         }
     }
 
-    /// Claude master card: two average usage bars across all "ok" accounts, an
-    /// "N개 계정 · 갱신 …" caption, and a chevron that drills into the detail panel.
-    @ViewBuilder
-    private func accountsSummary(snapshot: UsageSnapshot, accounts: [AccountUsage], provider: Provider) -> some View {
-        if let degraded = degradedMessage(for: snapshot.status.state, provider: provider) {
-            Text(degraded)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        Text("계정 평균")
-            .font(.caption2.bold())
-            .foregroundStyle(.secondary)
-        averageBar(label: "5h", value: AccountAverages.fiveHour(accounts))
-        averageBar(label: "주간", value: AccountAverages.sevenDay(accounts))
-        accountsAffordance(count: accounts.count, updatedAt: snapshot.accountsUpdatedAt)
-    }
-
     /// "N개 계정 · 갱신 X분 전" caption + chevron affordance that opens the
-    /// detail panel. Shared by the Claude average card and the Codex
-    /// aggregate card (Codex keeps its top-line but still gets this row once
-    /// it has per-account data to show).
+    /// detail panel. Codex keeps its top-line but still gets this row once it
+    /// has per-account data to show.
     @ViewBuilder
     private func accountsAffordance(count: Int, updatedAt: String?) -> some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
@@ -267,29 +253,6 @@ struct MenuBarContentView: View {
         return "\(seconds / 86_400)일 전"
     }
 
-    @ViewBuilder
-    private func averageBar(label: String, value: Double?) -> some View {
-        HStack(spacing: 6) {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 32, alignment: .leading)
-            if let value {
-                ProgressView(value: value)
-                    .progressViewStyle(.linear)
-                Text("\(Int(value * 100))%")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(width: 44, alignment: .trailing)
-            } else {
-                Text("데이터 없음")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-
     private func metricsRow(snapshot: UsageSnapshot) -> some View {
         HStack {
             Label(snapshot.burnState, systemImage: "bolt.fill")
@@ -302,7 +265,7 @@ struct MenuBarContentView: View {
         }
     }
 
-    private func quotaRow(label: String, window: RollingWindow) -> some View {
+    private func quotaRow(label: String, window: RollingWindow, accountAverage: Double? = nil) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
                 Text(label)
@@ -311,10 +274,17 @@ struct MenuBarContentView: View {
                     .frame(width: 32, alignment: .leading)
                 ProgressView(value: window.usedPct)
                     .progressViewStyle(.linear)
-                Text("\(Int(window.usedPct * 100))%")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(width: 36, alignment: .trailing)
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text("\(Int(window.usedPct * 100))%")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    if let accountAverage {
+                        Text("평균 \(Int(accountAverage * 100))%")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .frame(width: accountAverage == nil ? 36 : 58, alignment: .trailing)
             }
             // Reset 시각 + "남음" 표시. 5시간 윈도우는 분 단위로 줄어드니까
             // 30초 주기 TimelineView로 자동 갱신해 "남은 시간"이 stale로
@@ -454,6 +424,16 @@ struct MenuBarContentView: View {
         .padding(.vertical, 8)
     }
 
+}
+
+private struct AccountAverageValues {
+    let fiveHour: Double?
+    let sevenDay: Double?
+
+    init(accounts: [AccountUsage]) {
+        fiveHour = AccountAverages.fiveHour(accounts)
+        sevenDay = AccountAverages.sevenDay(accounts)
+    }
 }
 
 /// Publishes a view's height to `onChange` so the detail panel can match the
