@@ -10,9 +10,6 @@ struct AccountDetailPanel: View {
     /// Tokens/hour for the currently active account (aggregate burn). Non-active
     /// accounts fall back to their own `tokensPerHour` when present.
     let activeBurnPerHour: Double?
-    /// Snapshot-level fallback freshness timestamp, used when an individual
-    /// account has no `lastRefreshAt` of its own.
-    var accountsUpdatedAt: String?
     var onClose: (() -> Void)?
 
     var body: some View {
@@ -61,7 +58,7 @@ struct AccountDetailPanel: View {
     private func accountRow(_ account: AccountUsage) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             let statusLabel = accountStatusLabel(account.status)
-            let hasUsageData = account.fiveHour != nil || account.sevenDay != nil || account.totalTokens != nil || account.lastRefreshAt != nil
+            let hasUsageData = account.fiveHour != nil || account.sevenDay != nil || account.totalTokens != nil || account.tokensPerHour != nil
             HStack(spacing: 4) {
                 Image(systemName: account.active ? "largecircle.fill.circle" : "circle")
                     .font(.caption2)
@@ -96,24 +93,6 @@ struct AccountDetailPanel: View {
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.tertiary)
                 }
-                resetLine(account)
-                freshnessLine(account)
-            }
-        }
-    }
-
-    /// "데이터 갱신: N분 전" line. Prefers the account's own refresh timestamp,
-    /// falling back to the snapshot-level one; omitted entirely when both are
-    /// missing/unparsable.
-    @ViewBuilder
-    private func freshnessLine(_ account: AccountUsage) -> some View {
-        if let isoString = account.lastRefreshAt ?? accountsUpdatedAt,
-           let date = SnapshotDateFormatter.date(from: isoString) {
-            TimelineView(.periodic(from: .now, by: 30)) { context in
-                Text("데이터 갱신: \(MenuBarContentView.relativePast(date, now: context.date))")
-                    .font(.caption2)
-                    .foregroundStyle(MenuBarContentView.accountFreshnessIsStale(isoString, now: context.date) ? Color.orange : Color.secondary.opacity(0.65))
-                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
     }
@@ -137,44 +116,53 @@ struct AccountDetailPanel: View {
 
     @ViewBuilder
     private func miniBar(label: String, window: AccountWindow?) -> some View {
-        HStack(spacing: 6) {
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .frame(width: 26, alignment: .leading)
-            if let window {
-                let usedPct = Self.clampUnit(window.usedPct)
-                ProgressView(value: usedPct)
-                    .progressViewStyle(.linear)
-                Text("\(Int(usedPct * 100))%")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(width: 32, alignment: .trailing)
-            } else {
-                Text("데이터 없음")
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Text(label)
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 26, alignment: .leading)
+                if let window {
+                    let usedPct = Self.clampUnit(window.usedPct)
+                    ProgressView(value: usedPct)
+                        .progressViewStyle(.linear)
+                    Text("\(Int(usedPct * 100))%")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32, alignment: .trailing)
+                } else {
+                    Text("데이터 없음")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
+            if let window {
+                if let resetsAtString = window.resetsAt,
+                   let resetsAt = SnapshotDateFormatter.date(from: resetsAtString) {
+                    TimelineView(.periodic(from: .now, by: 30)) { context in
+                        resetCaption(MenuBarContentView.resetText(at: resetsAt, now: context.date))
+                    }
+                } else {
+                    resetCaption("리셋 정보 없음")
+                }
+            }
+        }
+    }
+
+    private func resetCaption(_ text: String) -> some View {
+        HStack(spacing: 6) {
+            Color.clear.frame(width: 26, height: 0)
+            Text(text)
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
 
     private static func clampUnit(_ value: Double) -> Double {
         min(max(value, 0), 1)
-    }
-
-    /// Reuses the shell's reset formatting so the "남음" countdown stays in sync
-    /// with the aggregate rows. Anchored on the 5h window's reset time.
-    @ViewBuilder
-    private func resetLine(_ account: AccountUsage) -> some View {
-        if let resetsAtString = account.fiveHour?.resetsAt,
-           let resetsAt = SnapshotDateFormatter.date(from: resetsAtString) {
-            TimelineView(.periodic(from: .now, by: 30)) { context in
-                Text(MenuBarContentView.resetText(at: resetsAt, now: context.date))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-        }
     }
 }

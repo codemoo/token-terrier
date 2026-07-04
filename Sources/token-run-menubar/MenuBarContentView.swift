@@ -86,7 +86,6 @@ struct MenuBarContentView: View {
                 provider: provider,
                 accounts: accounts,
                 activeBurnPerHour: activeBurnPerHour(provider),
-                accountsUpdatedAt: appState.status[provider].snapshot?.accountsUpdatedAt,
                 onClose: { selectedProvider = nil })
         } else {
             Color.clear
@@ -156,7 +155,7 @@ struct MenuBarContentView: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
-                    accountsAffordance(count: accounts.count, updatedAt: snapshot.accountsUpdatedAt)
+                    accountsAffordance(count: accounts.count)
                 } else if let degraded = degradedMessage(for: snapshot.status.state, provider: provider) {
                     Text(degraded)
                         .font(.caption)
@@ -167,7 +166,7 @@ struct MenuBarContentView: View {
                     // are only surfaced via the detail panel's `▸`.
                     aggregateMetrics(snapshot: snapshot)
                     if provider != .claude, !accounts.isEmpty {
-                        accountsAffordance(count: accounts.count, updatedAt: snapshot.accountsUpdatedAt)
+                        accountsAffordance(count: accounts.count)
                     }
                 }
             } else {
@@ -208,49 +207,20 @@ struct MenuBarContentView: View {
         }
     }
 
-    /// "N개 계정 · 갱신 X분 전" caption + chevron affordance that opens the
-    /// detail panel. Codex keeps its top-line but still gets this row once it
-    /// has per-account data to show.
+    /// Account count caption + chevron affordance that opens the detail panel.
+    /// Codex keeps its top-line but still gets this row once it has per-account
+    /// data to show.
     @ViewBuilder
-    private func accountsAffordance(count: Int, updatedAt: String?) -> some View {
-        TimelineView(.periodic(from: .now, by: 30)) { context in
-            HStack {
-                Text("\(count)개 계정")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                if let updatedCaption = Self.freshnessCaption(updatedAt, now: context.date) {
-                    Text("· \(updatedCaption)")
-                        .font(.caption2)
-                        .foregroundStyle(Self.accountFreshnessIsStale(updatedAt, now: context.date) ? Color.orange : Color.secondary.opacity(0.65))
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption2.bold())
-                    .foregroundStyle(.secondary)
-            }
+    private func accountsAffordance(count: Int) -> some View {
+        HStack {
+            Text("\(count)개 계정")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption2.bold())
+                .foregroundStyle(.secondary)
         }
-    }
-
-    /// Formats an ISO8601 timestamp as a short relative-past caption, e.g.
-    /// "갱신 3분 전". Returns nil when the string is missing or unparsable so
-    /// callers can simply omit the caption.
-    static func freshnessCaption(_ isoString: String?, now: Date) -> String? {
-        guard let isoString, let date = SnapshotDateFormatter.date(from: isoString) else { return nil }
-        return "갱신 \(relativePast(date, now: now))"
-    }
-
-    static func accountFreshnessIsStale(_ isoString: String?, now: Date) -> Bool {
-        guard let isoString, let date = SnapshotDateFormatter.date(from: isoString) else { return false }
-        return now.timeIntervalSince(date) > 10 * 60
-    }
-
-    /// "방금" / "N분 전" / "N시간 전" / "N일 전" relative-past label.
-    static func relativePast(_ date: Date, now: Date) -> String {
-        let seconds = max(0, Int(now.timeIntervalSince(date)))
-        if seconds < 60 { return "방금" }
-        if seconds < 3_600 { return "\(seconds / 60)분 전" }
-        if seconds < 86_400 { return "\(seconds / 3_600)시간 전" }
-        return "\(seconds / 86_400)일 전"
     }
 
     private func metricsRow(snapshot: UsageSnapshot) -> some View {
