@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,9 +27,11 @@ import (
 // current EOF (no historical replay — we don't want a startup spike of
 // stale events distorting the burn rate).
 type Poller struct {
-	ClaudeRoot   string // path, e.g. ~/.claude/projects
-	CodexRoot    string // path, e.g. ~/.codex/sessions
-	PollInterval time.Duration
+	ClaudeRoot                string // path, e.g. ~/.claude/projects
+	CodexRoot                 string // path, e.g. ~/.codex/sessions
+	ClaudeSwapSessionsRoot    string // path, e.g. ~/.claude-swap-backup/sessions
+	DisableClaudeSwapSessions bool
+	PollInterval              time.Duration
 
 	logger *slog.Logger
 	emit   func(TokenEvent)
@@ -51,13 +55,19 @@ func NewPoller(emit func(TokenEvent), logger *slog.Logger) *Poller {
 	if codexRoot == "" {
 		codexRoot = filepath.Join(home, ".codex", "sessions")
 	}
+	swapSessionsRoot := strings.TrimSpace(os.Getenv("TOKEN_USAGE_CLAUDE_SWAP_SESSIONS_ROOT"))
+	if swapSessionsRoot == "" {
+		swapSessionsRoot = filepath.Join(home, ".claude-swap-backup", "sessions")
+	}
 	return &Poller{
-		ClaudeRoot:   claudeRoot,
-		CodexRoot:    codexRoot,
-		PollInterval: 5 * time.Second,
-		logger:       logger,
-		emit:         emit,
-		offsets:      map[string]int64{},
+		ClaudeRoot:                claudeRoot,
+		CodexRoot:                 codexRoot,
+		ClaudeSwapSessionsRoot:    swapSessionsRoot,
+		DisableClaudeSwapSessions: os.Getenv("TOKEN_USAGE_DISABLE_CLAUDE_SWAP") == "1" || os.Getenv("TOKEN_USAGE_DISABLE_CLAUDE_SWAP_SESSIONS") == "1",
+		PollInterval:              5 * time.Second,
+		logger:                    logger,
+		emit:                      emit,
+		offsets:                   map[string]int64{},
 	}
 }
 
@@ -74,17 +84,18 @@ func (p *Poller) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			p.tickWithProvider(ctx, wire.ProviderClaude, p.ClaudeRoot)
-			p.tickWithProvider(ctx, wire.ProviderCodex, p.CodexRoot)
+			for _, root := range p.pollRoots() {
+				p.tickRoot(ctx, root)
+			}
 		}
 	}
 }
 
 func (p *Poller) bootstrapOffsets(ctx context.Context) {
-	for _, root := range []string{p.ClaudeRoot, p.CodexRoot} {
-		listing, err := p.listJSONL(ctx, root)
+	for _, root := range p.pollRoots() {
+		listing, err := p.listJSONL(ctx, root.path)
 		if err != nil {
-			p.logger.Warn("jsonl list failed during bootstrap", "root", root, "err", err)
+			p.logger.Warn("jsonl list failed during bootstrap", "root", root.path, "err", err)
 			continue
 		}
 		p.mu.Lock()
@@ -102,17 +113,104 @@ func (p *Poller) fileCount() int {
 	return len(p.offsets)
 }
 
-func (p *Poller) tickWithProvider(ctx context.Context, provider wire.Provider, root string) {
-	listing, err := p.listJSONL(ctx, root)
+type pollRoot struct {
+	provider            wire.Provider
+	path                string
+	claudeAccountNumber int
+}
+
+func (p *Poller) pollRoots() []pollRoot {
+	roots := []pollRoot{
+		{provider: wire.ProviderClaude, path: p.ClaudeRoot},
+	}
+	if !p.DisableClaudeSwapSessions {
+		roots = append(roots, discoverClaudeSwapProjectRoots(p.ClaudeSwapSessionsRoot)...)
+	}
+	roots = append(roots, pollRoot{provider: wire.ProviderCodex, path: p.CodexRoot})
+	return dedupePollRoots(roots)
+}
+
+func dedupePollRoots(roots []pollRoot) []pollRoot {
+	seen := map[string]struct{}{}
+	out := make([]pollRoot, 0, len(roots))
+	for _, root := range roots {
+		clean := filepath.Clean(strings.TrimSpace(root.path))
+		if clean == "" || clean == "." {
+			continue
+		}
+		key := string(root.provider) + "\x00" + clean
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		root.path = clean
+		out = append(out, root)
+	}
+	return out
+}
+
+func discoverClaudeSwapProjectRoots(sessionsRoot string) []pollRoot {
+	sessionsRoot = filepath.Clean(strings.TrimSpace(sessionsRoot))
+	if sessionsRoot == "" || sessionsRoot == "." {
+		return nil
+	}
+	entries, err := os.ReadDir(sessionsRoot)
 	if err != nil {
-		p.logger.Debug("jsonl list failed", "provider", provider, "err", err)
+		return nil
+	}
+	roots := make([]pollRoot, 0, len(entries))
+	for _, entry := range entries {
+		if entry == nil || !entry.IsDir() {
+			continue
+		}
+		accountNumber := parseClaudeSwapSessionAccountNumber(entry.Name())
+		if accountNumber <= 0 {
+			continue
+		}
+		projects := filepath.Join(sessionsRoot, entry.Name(), "projects")
+		if info, err := os.Stat(projects); err == nil && info.IsDir() {
+			roots = append(roots, pollRoot{
+				provider:            wire.ProviderClaude,
+				path:                projects,
+				claudeAccountNumber: accountNumber,
+			})
+		}
+	}
+	sort.SliceStable(roots, func(i, j int) bool {
+		return roots[i].claudeAccountNumber < roots[j].claudeAccountNumber
+	})
+	return roots
+}
+
+func parseClaudeSwapSessionAccountNumber(name string) int {
+	if name == "" {
+		return 0
+	}
+	i := 0
+	for i < len(name) && name[i] >= '0' && name[i] <= '9' {
+		i++
+	}
+	if i == 0 || i >= len(name) || name[i] != '-' {
+		return 0
+	}
+	n, err := strconv.Atoi(name[:i])
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
+}
+
+func (p *Poller) tickRoot(ctx context.Context, root pollRoot) {
+	listing, err := p.listJSONL(ctx, root.path)
+	if err != nil {
+		p.logger.Debug("jsonl list failed", "provider", root.provider, "err", err)
 		return
 	}
 	// Prune offsets for files that disappeared upstream — codex CLI
 	// rotates rollouts daily and Claude Code sessions get cleaned up by
 	// the user's retention script. Without this the offset map grows
 	// unbounded across months of uptime.
-	p.pruneStaleOffsets(root, listing)
+	p.pruneStaleOffsets(root.path, listing)
 
 	for path, currentSize := range listing {
 		p.mu.Lock()
@@ -142,7 +240,7 @@ func (p *Poller) tickWithProvider(ctx context.Context, provider wire.Provider, r
 			p.logger.Debug("jsonl tail failed", "path", path, "err", err)
 			continue
 		}
-		consumed := p.parseAndEmit(provider, path, newBytes)
+		consumed := p.parseAndEmit(root, path, newBytes)
 		p.mu.Lock()
 		p.offsets[path] = prev + int64(consumed)
 		p.mu.Unlock()
@@ -229,7 +327,7 @@ func (p *Poller) tailFrom(ctx context.Context, path string, offset int64) ([]byt
 // the number of bytes "consumed" — strictly less than len(buf) when the
 // last line is partial (no trailing newline yet). The trailing fragment is
 // re-read on the next tick when the rest arrives.
-func (p *Poller) parseAndEmit(provider wire.Provider, path string, buf []byte) int {
+func (p *Poller) parseAndEmit(root pollRoot, path string, buf []byte) int {
 	consumed := 0
 	for {
 		nl := indexNL(buf[consumed:])
@@ -239,7 +337,8 @@ func (p *Poller) parseAndEmit(provider wire.Provider, path string, buf []byte) i
 		end := consumed + nl
 		line := buf[consumed:end]
 		consumed = end + 1 // skip the '\n'
-		if ev := ParseLine(provider, line, path); ev != nil {
+		if ev := ParseLine(root.provider, line, path); ev != nil {
+			ev.AccountNumber = root.claudeAccountNumber
 			p.emit(*ev)
 		}
 	}

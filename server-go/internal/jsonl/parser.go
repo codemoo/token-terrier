@@ -22,11 +22,12 @@ import (
 
 // TokenEvent is one token-counted activity observed in a session log.
 type TokenEvent struct {
-	Provider   wire.Provider
-	Timestamp  time.Time
-	Tokens     int
-	Model      string
-	SessionKey string
+	Provider      wire.Provider
+	Timestamp     time.Time
+	Tokens        int
+	Model         string
+	SessionKey    string
+	AccountNumber int
 }
 
 // ParseLine returns a TokenEvent for the given JSONL line if it carries

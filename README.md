@@ -130,6 +130,7 @@ Bearer tokens:      ~/.config/token-usage/tokens.json
 Claude credentials: ~/.claude/.credentials.json
 Codex credentials:  ~/.codex/auth.json
 Claude JSONL:       ~/.claude/projects/**/*.jsonl
+Claude-swap JSONL:  ~/.claude-swap-backup/sessions/*/projects/**/*.jsonl
 Codex JSONL:        ~/.codex/sessions/**/*.jsonl
 Hermes SQLite:      ~/.hermes/state.db
 codex-lb API:       http://127.0.0.1:2455/v1/usage
@@ -143,12 +144,14 @@ TOKEN_USAGE_PORT=18910
 TOKEN_USAGE_CLAUDE_CRED=/path/to/.claude/.credentials.json
 TOKEN_USAGE_CODEX_CRED=/path/to/.codex/auth.json
 TOKEN_USAGE_CLAUDE_PROJECTS=/path/to/.claude/projects
+TOKEN_USAGE_CLAUDE_SWAP_SESSIONS_ROOT=/path/to/.claude-swap-backup/sessions
 TOKEN_USAGE_CODEX_SESSIONS=/path/to/.codex/sessions
 TOKEN_USAGE_HERMES_DB=/path/to/.hermes/state.db
 CODEX_LB_API_KEY=<codex-lb-api-key>
 TOKEN_USAGE_CODEX_LB_URL=http://127.0.0.1:2455
 TOKEN_USAGE_CODEX_LB_API_KEY=<codex-lb-api-key>
 TOKEN_USAGE_DISABLE_JSONL=1
+TOKEN_USAGE_DISABLE_CLAUDE_SWAP_SESSIONS=1
 TOKEN_USAGE_DISABLE_HERMES=1
 TOKEN_USAGE_DISABLE_CODEX_LB=1
 ```

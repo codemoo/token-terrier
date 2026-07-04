@@ -127,6 +127,7 @@ type Reader struct {
 	lastMod       time.Time
 	lastCheck     time.Time
 	checked       bool
+	activity      ActivityProvider
 }
 
 // NewReader builds a Reader for the given accounts file path.
@@ -135,6 +136,25 @@ func NewReader(path string, logger *slog.Logger) *Reader {
 		logger = slog.Default()
 	}
 	return &Reader{path: path, logger: logger, checkEvery: 2 * time.Second}
+}
+
+// SetActivityProvider attaches live JSONL-derived per-account activity.
+func (r *Reader) SetActivityProvider(p ActivityProvider) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.activity = p
+}
+
+// ActiveAccountNumber returns the current claude-swap active account number,
+// or 0 when no active account row is known.
+func (r *Reader) ActiveAccountNumber() int {
+	accts, _ := r.Accounts()
+	for _, acct := range accts {
+		if acct.Active && acct.Number > 0 {
+			return acct.Number
+		}
+	}
+	return 0
 }
 
 // Accounts returns the current accounts and their file mtime (RFC3339), or
@@ -146,7 +166,7 @@ func (r *Reader) Accounts() ([]wire.AccountUsage, *string) {
 
 	now := time.Now()
 	if r.checked && now.Sub(r.lastCheck) < r.checkEvery {
-		return r.cachedAccts, r.cachedUpdated
+		return r.accountsWithActivityLocked(now), r.cachedUpdated
 	}
 	r.checked = true
 	r.lastCheck = now
@@ -160,21 +180,21 @@ func (r *Reader) Accounts() ([]wire.AccountUsage, *string) {
 		}
 		// Transient stat error (e.g. permission flicker): keep last-good and
 		// don't advance lastMod, so a later successful stat re-parses.
-		return r.cachedAccts, r.cachedUpdated
+		return r.accountsWithActivityLocked(now), r.cachedUpdated
 	}
 	if !r.lastMod.IsZero() && info.ModTime().Equal(r.lastMod) {
-		return r.cachedAccts, r.cachedUpdated
+		return r.accountsWithActivityLocked(now), r.cachedUpdated
 	}
 
 	data, err := os.ReadFile(r.path)
 	if err != nil {
-		return r.cachedAccts, r.cachedUpdated // keep last-good on a transient read error
+		return r.accountsWithActivityLocked(now), r.cachedUpdated // keep last-good on a transient read error
 	}
 	accts, perr := parseAccounts(data)
 	r.lastMod = info.ModTime()
 	if perr != nil {
 		r.logger.Debug("claude-swap accounts parse failed", "err", perr)
-		return r.cachedAccts, r.cachedUpdated
+		return r.accountsWithActivityLocked(now), r.cachedUpdated
 	}
 	r.cachedAccts = accts
 	if accts == nil {
@@ -184,5 +204,26 @@ func (r *Reader) Accounts() ([]wire.AccountUsage, *string) {
 		r.cachedUpdated = &u
 	}
 	r.logger.Debug("claude-swap accounts loaded", "count", len(accts))
-	return r.cachedAccts, r.cachedUpdated
+	return r.accountsWithActivityLocked(now), r.cachedUpdated
+}
+
+func (r *Reader) accountsWithActivityLocked(now time.Time) []wire.AccountUsage {
+	if r.cachedAccts == nil {
+		return nil
+	}
+	out := append([]wire.AccountUsage(nil), r.cachedAccts...)
+	if r.activity == nil {
+		return out
+	}
+	for i := range out {
+		stats, ok := r.activity.Snapshot(out[i].Number, now)
+		if !ok {
+			continue
+		}
+		tokensPerHour := stats.TokensPerHour
+		totalTokens := stats.TotalTokens
+		out[i].TokensPerHour = &tokensPerHour
+		out[i].TotalTokens = &totalTokens
+	}
+	return out
 }

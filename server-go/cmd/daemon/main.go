@@ -92,12 +92,17 @@ func main() {
 	claudeState := state.New(wire.ProviderClaude, credStore, usageClient, stateRefresher, claudeBurn, producer, logger)
 	codexState := state.New(wire.ProviderCodex, credStore, usageClient, stateRefresher, codexBurn, producer, logger)
 	codexState.SetLocalSnapshotter(codexlb.NewSnapshotter(producer, logger))
+	var claudeSwapActivity *claudeswap.ActivityTracker
+	var claudeSwapReader *claudeswap.Reader
 	if os.Getenv("TOKEN_USAGE_DISABLE_CLAUDE_SWAP") != "1" {
 		swapPath := strings.TrimSpace(os.Getenv("TOKEN_USAGE_CLAUDE_SWAP_ACCOUNTS"))
 		if swapPath == "" {
 			swapPath = filepath.Join(home, ".config", "token-usage", "claude-swap-accounts.json")
 		}
-		claudeState.SetAccountsProvider(claudeswap.NewReader(swapPath, logger))
+		claudeSwapActivity = claudeswap.NewActivityTracker(time.Local, now)
+		claudeSwapReader = claudeswap.NewReader(swapPath, logger)
+		claudeSwapReader.SetActivityProvider(claudeSwapActivity)
+		claudeState.SetAccountsProvider(claudeSwapReader)
 	}
 	if os.Getenv("TOKEN_USAGE_DISABLE_CODEX_ACCOUNTS") != "1" {
 		p := strings.TrimSpace(os.Getenv("TOKEN_USAGE_CODEX_ACCOUNTS"))
@@ -134,7 +139,7 @@ func main() {
 	var wg sync.WaitGroup
 
 	if os.Getenv("TOKEN_USAGE_DISABLE_JSONL") != "1" {
-		startJSONLPoller(rootCtx, &wg, claudeState, codexState, claudeHub, codexHub, logger)
+		startJSONLPoller(rootCtx, &wg, claudeState, codexState, claudeHub, codexHub, logger, claudeSwapActivity, claudeSwapReader)
 	}
 	// Hermes SQLite poller captures broader API usage when Hermes is present.
 	// Set TOKEN_USAGE_DISABLE_HERMES=1 to skip it.
@@ -209,8 +214,8 @@ func startPeriodicRefresh(ctx context.Context, wg *sync.WaitGroup, st *state.Sta
 // startJSONLPoller wires the JSONL poller into per-provider
 // state ingestion. Each token event bumps the burn rate and broadcasts a
 // fresh snapshot through the SSE hub.
-func startJSONLPoller(ctx context.Context, wg *sync.WaitGroup, claude, codex *state.State, claudeHub, codexHub *sse.Hub, logger *slog.Logger) {
-	emit := makeEventEmitter(claude, codex, claudeHub, codexHub, logger, "jsonl")
+func startJSONLPoller(ctx context.Context, wg *sync.WaitGroup, claude, codex *state.State, claudeHub, codexHub *sse.Hub, logger *slog.Logger, claudeActivity accountActivityRecorder, activeClaude activeAccountResolver) {
+	emit := makeEventEmitter(claude, codex, claudeHub, codexHub, logger, "jsonl", claudeActivity, activeClaude)
 	poller := jsonl.NewPoller(emit, logger)
 	wg.Add(1)
 	go func() {
@@ -224,7 +229,7 @@ func startJSONLPoller(ctx context.Context, wg *sync.WaitGroup, claude, codex *st
 // (`hermes:<id>`) so they stay distinct from JSONL session paths in the
 // today_sessions count.
 func startHermesPoller(ctx context.Context, wg *sync.WaitGroup, claude, codex *state.State, claudeHub, codexHub *sse.Hub, logger *slog.Logger) {
-	emit := makeEventEmitter(claude, codex, claudeHub, codexHub, logger, "hermes")
+	emit := makeEventEmitter(claude, codex, claudeHub, codexHub, logger, "hermes", nil, nil)
 	poller := hermes.NewPoller(emit, logger)
 	wg.Add(1)
 	go func() {
@@ -302,15 +307,29 @@ func startPprofListener(logger *slog.Logger) {
 	}()
 }
 
+type accountActivityRecorder interface {
+	Ingest(jsonl.TokenEvent, time.Time)
+}
+
+type activeAccountResolver interface {
+	ActiveAccountNumber() int
+}
+
 // makeEventEmitter returns a closure that ingests an event into the right
 // provider's state and publishes the resulting snapshot through its hub.
-func makeEventEmitter(claude, codex *state.State, claudeHub, codexHub *sse.Hub, logger *slog.Logger, source string) func(jsonl.TokenEvent) {
+func makeEventEmitter(claude, codex *state.State, claudeHub, codexHub *sse.Hub, logger *slog.Logger, source string, claudeActivity accountActivityRecorder, activeClaude activeAccountResolver) func(jsonl.TokenEvent) {
 	return func(ev jsonl.TokenEvent) {
 		now := time.Now()
 		var snap wire.UsageSnapshot
 		var hub *sse.Hub
 		switch ev.Provider {
 		case wire.ProviderClaude:
+			if claudeActivity != nil {
+				if ev.AccountNumber <= 0 && activeClaude != nil {
+					ev.AccountNumber = activeClaude.ActiveAccountNumber()
+				}
+				claudeActivity.Ingest(ev, now)
+			}
 			snap = claude.IngestEvent(ev, now)
 			hub = claudeHub
 		case wire.ProviderCodex:

@@ -4,6 +4,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -201,5 +202,75 @@ func TestReaderWrongSchemaReturnsNil(t *testing.T) {
 	r := NewReader(path, nil)
 	if accts, updated := r.Accounts(); accts != nil || updated != nil {
 		t.Fatalf("wrong schema → (nil,nil), got (%v,%v)", accts, updated)
+	}
+}
+
+type fakeActivity struct {
+	mu    sync.Mutex
+	stats map[int]ActivitySnapshot
+}
+
+func (f *fakeActivity) Snapshot(accountNumber int, now time.Time) (ActivitySnapshot, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	stats, ok := f.stats[accountNumber]
+	return stats, ok
+}
+
+func (f *fakeActivity) set(accountNumber int, stats ActivitySnapshot) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.stats == nil {
+		f.stats = map[int]ActivitySnapshot{}
+	}
+	f.stats[accountNumber] = stats
+}
+
+func TestReaderOverlaysActivityWithoutReparse(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "accounts.json")
+	if err := os.WriteFile(path, []byte(sampleTwoAccounts), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	activity := &fakeActivity{stats: map[int]ActivitySnapshot{
+		1: {TokensPerHour: 1200, TotalTokens: 300},
+	}}
+	r := NewReader(path, nil)
+	r.SetActivityProvider(activity)
+	r.checkEvery = time.Hour
+
+	accts, _ := r.Accounts()
+	if len(accts) != 2 {
+		t.Fatalf("len = %d, want 2", len(accts))
+	}
+	if accts[0].TokensPerHour == nil || *accts[0].TokensPerHour != 1200 {
+		t.Fatalf("account 1 tokens/hour = %v, want 1200", accts[0].TokensPerHour)
+	}
+	if accts[0].TotalTokens == nil || *accts[0].TotalTokens != 300 {
+		t.Fatalf("account 1 total = %v, want 300", accts[0].TotalTokens)
+	}
+	if accts[1].TokensPerHour != nil || accts[1].TotalTokens != nil {
+		t.Fatalf("account 2 should have no overlay, got %+v", accts[1])
+	}
+
+	activity.set(1, ActivitySnapshot{TokensPerHour: 2400, TotalTokens: 700})
+	accts, _ = r.Accounts()
+	if accts[0].TokensPerHour == nil || *accts[0].TokensPerHour != 2400 {
+		t.Fatalf("throttled read should still refresh overlay, got %v", accts[0].TokensPerHour)
+	}
+	if accts[0].TotalTokens == nil || *accts[0].TotalTokens != 700 {
+		t.Fatalf("throttled read should still refresh total, got %v", accts[0].TotalTokens)
+	}
+}
+
+func TestReaderActiveAccountNumber(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "accounts.json")
+	if err := os.WriteFile(path, []byte(sampleTwoAccounts), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := NewReader(path, nil)
+	if got := r.ActiveAccountNumber(); got != 2 {
+		t.Fatalf("active account = %d, want 2", got)
 	}
 }
