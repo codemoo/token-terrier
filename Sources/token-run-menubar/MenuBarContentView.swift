@@ -188,13 +188,18 @@ struct MenuBarContentView: View {
         }
     }
 
-    /// The aggregate top-line (burn + 5h/weekly + credits). Claude can annotate
-    /// its quota rows with account-pool averages without adding a separate block.
+    /// The top-line burn + quota rows. Claude account rows replace the selected
+    /// account's quota windows with account-pool averages.
     @ViewBuilder
     private func aggregateMetrics(snapshot: UsageSnapshot, accountAverages: AccountAverageValues? = nil) -> some View {
         metricsRow(snapshot: snapshot)
-        quotaRow(label: "5h", window: snapshot.rolling5h, accountAverage: accountAverages?.fiveHour)
-        quotaRow(label: "주간", window: snapshot.weekly, accountAverage: accountAverages?.sevenDay)
+        let hasAverages = accountAverages != nil
+        quotaRow(
+            label: "5h",
+            window: displayWindow(snapshot.rolling5h, accountAverages?.fiveHour, hasAccountAverages: hasAverages))
+        quotaRow(
+            label: "주간",
+            window: displayWindow(snapshot.weekly, accountAverages?.sevenDay, hasAccountAverages: hasAverages))
         if let credits = snapshot.credits {
             HStack {
                 Text("Credits")
@@ -205,6 +210,13 @@ struct MenuBarContentView: View {
                     .font(.caption.monospacedDigit())
             }
         }
+    }
+
+    private func displayWindow(_ snapshotWindow: RollingWindow, _ averageWindow: RollingWindow?, hasAccountAverages: Bool) -> RollingWindow {
+        if let averageWindow {
+            return averageWindow
+        }
+        return hasAccountAverages ? .empty : snapshotWindow
     }
 
     /// Account count caption + chevron affordance that opens the detail panel.
@@ -235,7 +247,7 @@ struct MenuBarContentView: View {
         }
     }
 
-    private func quotaRow(label: String, window: RollingWindow, accountAverage: Double? = nil) -> some View {
+    private func quotaRow(label: String, window: RollingWindow) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
                 Text(label)
@@ -244,17 +256,10 @@ struct MenuBarContentView: View {
                     .frame(width: 32, alignment: .leading)
                 ProgressView(value: window.usedPct)
                     .progressViewStyle(.linear)
-                VStack(alignment: .trailing, spacing: 0) {
-                    Text("\(Int(window.usedPct * 100))%")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                    if let accountAverage {
-                        Text("평균 \(Int(accountAverage * 100))%")
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                .frame(width: accountAverage == nil ? 36 : 58, alignment: .trailing)
+                Text("\(Int(window.usedPct * 100))%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36, alignment: .trailing)
             }
             // Reset 시각 + "남음" 표시. 5시간 윈도우는 분 단위로 줄어드니까
             // 30초 주기 TimelineView로 자동 갱신해 "남은 시간"이 stale로
@@ -397,12 +402,12 @@ struct MenuBarContentView: View {
 }
 
 private struct AccountAverageValues {
-    let fiveHour: Double?
-    let sevenDay: Double?
+    let fiveHour: RollingWindow?
+    let sevenDay: RollingWindow?
 
     init(accounts: [AccountUsage]) {
-        fiveHour = AccountAverages.fiveHour(accounts)
-        sevenDay = AccountAverages.sevenDay(accounts)
+        fiveHour = AccountAverages.fiveHourWindow(accounts)
+        sevenDay = AccountAverages.sevenDayWindow(accounts)
     }
 }
 
